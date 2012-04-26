@@ -15,6 +15,7 @@ from subprocess import Popen, PIPE
 import signal
 
 import xpra
+from xpra.bencode import bencode
 from xpra.dotxpra import DotXpra
 from xpra.platform import (XPRA_LOCAL_SERVERS_SUPPORTED,
                            DEFAULT_SSH_CMD,
@@ -22,45 +23,14 @@ from xpra.platform import (XPRA_LOCAL_SERVERS_SUPPORTED,
                            add_client_options)
 from xpra.protocol import TwoFileConnection, SocketConnection
 
-from wimpiggy.gobject_compat import import_gobject, is_gtk3
-import_gobject()
+ENCODINGS = ["rgb24"]
 try:
     import Image
     assert Image
-    _has_PIL = True
-except:
-    _has_PIL = False
-ENCODINGS = []
-if is_gtk3():
-    """ with gtk3, we get png via cairo out of the box
-        but we need PIL for the others:
-    """
+    ENCODINGS.append("jpeg")
     ENCODINGS.append("png")
-    if _has_PIL:
-        ENCODINGS.append("jpeg")
-        ENCODINGS.append("rgb24")
-else:
-    """ with gtk2, we get rgb24 via gdk pixbuf out of the box
-        but we need PIL for the others:
-    """
-    if _has_PIL:
-        ENCODINGS.append("png")
-        ENCODINGS.append("jpeg")
-    ENCODINGS.append("rgb24")
-#we need rgb24 for x264 and vpx (as well as the cython bindings and libraries):
-if "rgb24" in ENCODINGS:
-    try:
-        from xpra.x264 import codec     #@UnusedImport @UnresolvedImport
-        ENCODINGS.append("x264")
-    except Exception, e:
-        pass
-    try:
-        from xpra.vpx import codec      #@UnusedImport @UnresolvedImport @Reimport
-        ENCODINGS.append("vpx")
-    except Exception, e:
-        pass
-DEFAULT_ENCODING = ENCODINGS[0]
-
+except:
+    pass
 
 
 def nox():
@@ -117,7 +87,7 @@ def main(script_file, cmdline):
                           dest="use_display", default=False,
                           help="Use an existing display rather than starting one with xvfb")
         parser.add_option("--xvfb", action="store",
-                          dest="xvfb", default="Xvfb +extension Composite -screen 0 3840x2560x24+32 -nolisten tcp -noreset -auth $XAUTHORITY", metavar="CMD",
+                          dest="xvfb", default="Xvfb +extension Composite -screen 0 3840x2560x24+32 -noreset -auth $XAUTHORITY", metavar="CMD",
                           help="How to run the headless X server (default: '%default')")
         parser.add_option("--no-randr", action="store_false",
                           dest="randr", default=True,
@@ -162,7 +132,7 @@ def main(script_file, cmdline):
     parser.add_option("--encoding", action="store",
                       metavar="ENCODING",
                       dest="encoding", type="str",
-                      help="What image compression algorithm to use: %s. Default: %s" % (", ".join(ENCODINGS), DEFAULT_ENCODING))
+                      help="What image compression algorithm to use: %s. Default: rgb24" % (", ".join(ENCODINGS)))
     if "jpeg" in ENCODINGS:
         parser.add_option("--jpeg-quality", action="store",
                           metavar="LEVEL",
@@ -216,7 +186,7 @@ def main(script_file, cmdline):
     if not args:
         parser.error("need a mode")
     if options.encoding and options.encoding not in ENCODINGS:
-        parser.error("encoding %s is not supported, try: %s" % (options.encoding, ", ".join(ENCODINGS)))
+        parser.error("illegal encoding")
 
     def toggle_logging(level):
         if not options.debug:
@@ -318,6 +288,8 @@ def parse_display_name(parser, opts, display_name):
 
 def pick_display(parser, opts, extra_args):
     if len(extra_args) == 0:
+        if not XPRA_LOCAL_SERVERS_SUPPORTED:
+            parser.error("need to specify a display")
         # Pick a default server
         sockdir = DotXpra(opts.sockdir)
         servers = sockdir.sockets()
@@ -361,7 +333,7 @@ def connect_or_fail(display_desc):
                 raise IOError(error_message)
         return TwoFileConnection(child.stdin, child.stdout, abort_test, target=cmd)
 
-    elif display_desc["type"] == "unix-domain":
+    elif XPRA_LOCAL_SERVERS_SUPPORTED and display_desc["type"] == "unix-domain":
         sockdir = DotXpra(display_desc["sockdir"])
         sock = socket.socket(socket.AF_UNIX)
         sockfile = sockdir.socket_path(display_desc["display"])
@@ -399,11 +371,11 @@ def run_client(parser, opts, extra_args, mode):
         from xpra.client import XpraClient
         app = XpraClient(conn, opts)
     def got_gibberish_msg(obj, data):
-        if str(data).find("assword")>0:
+        if "assword" in data:
             sys.stdout.write("Your ssh program appears to be asking for a password.\n"
                              + GOT_PASSWORD_PROMPT_SUGGESTION)
             sys.stdout.flush()
-        if str(data).find("login")>=0:
+        if "login" in data:
             sys.stdout.write("Your ssh program appears to be asking for a username.\n"
                              "Perhaps try using something like 'ssh:USER@host:display'?\n")
             sys.stdout.flush()
@@ -431,41 +403,35 @@ def run_proxy(parser, opts, extra_args):
 
 def run_stop(parser, opts, extra_args):
     assert "gtk" not in sys.modules
-    from xpra.client_base import StopXpraClient
-
-    def show_final_state(display):
-        sockdir = DotXpra(opts.sockdir)
-        for _ in range(6):
-            final_state = sockdir.server_state(display)
-            if final_state is DotXpra.LIVE:
-                time.sleep(0.5)
-        if final_state is DotXpra.DEAD:
-            print("xpra at %s has exited." % display)
-            return 0
-        elif final_state is DotXpra.UNKNOWN:
-            print("How odd... I'm not sure what's going on with xpra at %s" % display)
-            return 1
-        elif final_state is DotXpra.LIVE:
-            print("Failed to shutdown xpra at %s" % display)
-            return 1
-        else:
-            assert False, "invalid state: %s" % final_state
-            return 1
+    magic_string = bencode(["hello", {"__prerelease_version": xpra.__version__}]) + bencode(["shutdown-server"])
 
     display_desc = pick_display(parser, opts, extra_args)
     conn = connect_or_fail(display_desc)
-    e = 1
-    try:
-        app = StopXpraClient(conn, opts)
-        e = app.run()
-    finally:
-        app.cleanup()
+    while magic_string:
+        magic_string = magic_string[conn.write(magic_string):]
+    while conn.read(4096):
+        pass
     if display_desc["local"]:
-        show_final_state(display_desc["display"])
+        sockdir = DotXpra(opts.sockdir)
+        for _ in xrange(6):
+            final_state = sockdir.server_state(display_desc["display"])
+            if final_state is DotXpra.LIVE:
+                break
+            time.sleep(0.5)
+        if final_state is DotXpra.DEAD:
+            print("xpra at %s has exited." % display_desc["display"])
+            sys.exit(0)
+        elif final_state is DotXpra.UNKNOWN:
+            print("How odd... I'm not sure what's going on with xpra at %s"
+                   % display_desc["display"])
+            sys.exit(1)
+        elif final_state is DotXpra.LIVE:
+            print("Failed to shutdown xpra at %s" % display_desc["display"])
+            sys.exit(1)
+        else:
+            assert False, "invalid state: %s" % final_state
     else:
         print("Sent shutdown command")
-    sys.exit(e)
-
 
 def run_list(parser, opts, extra_args):
     assert "gtk" not in sys.modules

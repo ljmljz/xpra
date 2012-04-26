@@ -3,23 +3,18 @@
 # Parti is released under the terms of the GNU GPL v2, or, at your option, any
 # later version. See the file COPYING for details.
 
-%define version 0.2.0
+%define version 0.1.0
 %{!?python_sitelib: %define python_sitelib %(%{__python} -c "from distutils.sysconfig import get_python_lib; print get_python_lib()")}
 %define is_suse %(test -e /etc/SuSE-release && echo 1 || echo 0)
 %define include_egg 1
 
 %define requires pygtk2, xorg-x11-server-utils, xorg-x11-server-Xvfb, python-imaging, dbus-python
-%define requires_extra , libvpx, libx264
-%if 0%{?static_video_libs}
-%define requires_extra %{nil}
-%endif
 %if 0%{?el5}
-%define requires_extra , python-uuid, python-ctypes
+%define requires pygtk2, xorg-x11-server-utils, xorg-x11-server-Xvfb, python-imaging, dbus-python, python-uuid
 %define include_egg 0
 %endif
 %if %is_suse
 %define requires python-gtk, xorg-x11-server, xorg-x11-server-extra, libpng12-0, dbus-1-python
-%define requires_extra %{nil}
 %endif
 
 
@@ -29,7 +24,7 @@ Name: xpra
 Version: %{version}
 Release: %{build_no}
 License: GPL
-Requires: %{requires} %{requires_extra}
+Requires: %{requires}
 Group: Networking
 Packager: Antoine Martin <antoine@nagafix.co.uk>
 URL: http://xpra.org/
@@ -42,11 +37,6 @@ BuildRequires: python, setuptool
 ### Patches ###
 # if building a generic rpm (without .so) which works as client only
 Patch0: disable-posix-server.patch
-Patch1: disable-x264.patch
-Patch2: disable-vpx.patch
-Patch3: use-static-x264lib.patch
-Patch4: use-static-vpxlib.patch
-
 
 %description
 Xpra gives you "persistent remote applications" for X. That is, unlike normal X applications, applications run with xpra are "persistent" -- you can run them remotely, and they don't die if your connection does. You can detach them, and reattach them later -- even from another computer -- with no loss of state. And unlike VNC or RDP, xpra is for remote applications, not remote desktops -- individual applications show up as individual windows on your screen, managed by your window manager. They're not trapped in a box.
@@ -55,16 +45,6 @@ So basically it's screen for remote X apps.
 
 
 %changelog
-* Fri Apr 20 2012 Antoine Martin <antoine@nagafix.co.uk> 0.2.0-1
-- x264 and vpx video encoding support
-- gtk3 and python 3 partial support (client only - no keyboard support)
-- detect missing X11 server extensions and exit with error
-- X11 vfb servers no longer listens on a TCP port
-- clipboard fixes for Qt/KDE applications
-- option for clients not to supply any keyboard mapping data (the server will no longer complain)
-- show more system version information in session information dialog
-- hide window decorations for openoffice splash screen (workaround)
-
 * Wed Mar 21 2012 Antoine Martin <antoine@nagafix.co.uk> 0.1.0-1
 - security: strict filtering of packet handlers until connection authenticated
 - prevent DoS: limit number of concurrent connections attempting login (20)
@@ -256,17 +236,9 @@ So basically it's screen for remote X apps.
 %prep
 rm -rf $RPM_BUILD_DIR/parti-all-%{version}
 zcat $RPM_SOURCE_DIR/parti-all-%{version}.tar.gz | tar -xvf -
-cd parti-all-%{version}
 %if %{defined generic_rpm}
-%patch0 -p1
-%endif
-%if 0%{?no_video}
-%patch1 -p1
-%patch2 -p1
-%endif
-%if 0%{?static_video_libs}
-%patch3 -p1
-%patch4 -p1
+cd parti-all-%{version}
+%patch0 -p0
 %endif
 
 %build
@@ -295,7 +267,6 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/parti
 %{_bindir}/parti-repl
 %{_bindir}/xpra
-%{_bindir}/xpra_launcher
 %{python_sitelib}/xpra
 %{python_sitelib}/parti
 %{python_sitelib}/wimpiggy
@@ -307,8 +278,7 @@ rm -rf $RPM_BUILD_ROOT
 /usr/share/wimpiggy
 /usr/share/man/man1/xpra.*
 /usr/share/man/man1/parti.*
-/usr/share/applications/xpra_launcher.desktop
-/usr/share/icons/xpra.png
+
 
 ###
 ### eof

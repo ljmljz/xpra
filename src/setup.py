@@ -19,17 +19,62 @@ from distutils.core import setup
 from distutils.extension import Extension
 import subprocess, sys, traceback
 
+# Tweaked from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/502261
+def pkgconfig(*packages, **kw):
+    flag_map = {'-I': 'include_dirs',
+                '-L': 'library_dirs',
+                '-l': 'libraries'}
+    cmd = ["pkg-config", "--libs", "--cflags", "%s" % (" ".join(packages),)]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (output, _) = proc.communicate()
+    status = proc.wait()
+    if status!=0 and not ('clean' in sys.argv):
+        raise Exception("call to pkg-config ('%s') failed" % (cmd,))
+    for token in output.split():
+        if flag_map.has_key(token[:2]):
+            kw.setdefault(flag_map.get(token[:2]), []).append(token[2:])
+        else: # throw others to extra_link_args
+            kw.setdefault('extra_link_args', []).append(token)
+        for k, v in kw.iteritems(): # remove duplicates
+            kw[k] = list(set(v))
+    return kw
+
+from xpra.platform import XPRA_LOCAL_SERVERS_SUPPORTED
+if XPRA_LOCAL_SERVERS_SUPPORTED:
+    from Cython.Distutils import build_ext
+    from Cython.Compiler.Version import version as cython_version_string
+    cython_version = [int(part) for part in cython_version_string.split(".")]
+    # This was when the 'for 0 < i < 10:' syntax as added, bump upwards as
+    # necessary:
+    NEEDED_CYTHON = (0, 14, 0)
+    if tuple(cython_version) < NEEDED_CYTHON:
+        sys.exit("ERROR: Your version of Cython is too old to build this package\n"
+                 "You have version %s\n"
+                 "Please upgrade to Cython %s or better"
+                 % (cython_version_string,
+                    ".".join([str(part) for part in NEEDED_CYTHON])))
+
+    ext_modules = [
+      Extension("wimpiggy.lowlevel.bindings",
+                ["wimpiggy/lowlevel/bindings.pyx"],
+                **pkgconfig("pygobject-2.0", "gdk-x11-2.0", "gtk+-x11-2.0",
+                            "xtst", "xfixes", "xcomposite", "xdamage", "xrandr")
+                ),
+      Extension("xpra.wait_for_x_server",
+                ["xpra/wait_for_x_server.pyx"],
+                **pkgconfig("x11")
+                ),
+      ]
+
+    cmdclass = {'build_ext': build_ext}
+else:
+    ext_modules = []
+    cmdclass = {}
+
 import wimpiggy
 import parti
 import xpra
 assert wimpiggy.__version__ == parti.__version__ == xpra.__version__
-
-
-packages = ["wimpiggy", "wimpiggy.lowlevel",
-          "parti", "parti.trays", "parti.addons", "parti.scripts",
-          "xpra", "xpra.scripts", "xpra.platform",
-          "xpra.xposix", "xpra.win32", "xpra.darwin",
-          ]
 
 # Add build info to build_info.py file:
 import add_build_info
@@ -57,8 +102,7 @@ full_desc = """This package contains several sub-projects:
 
 extra_options = {}
 if sys.platform.startswith("win"):
-    # The Microsoft C library DLLs:
-    # Unfortunately, these files cannot be re-distributed legally :(
+    # These files cannot be re-distributed legally :(
     # So here is the md5sum so you can find the right version:
     # 6fda4c0ef8715eead5b8cec66512d3c8  Microsoft.VC90.CRT/Microsoft.VC90.CRT.manifest
     # 4a8bc195abdc93f0db5dab7f5093c52f  Microsoft.VC90.CRT/msvcm90.dll
@@ -72,46 +116,14 @@ if sys.platform.startswith("win"):
     # 371226b8346f29011137c7aa9e93f2f6  Microsoft.VC90.MFC/mfcm90u.dll
     #
     # This is where I keep them, you will obviously need to change this value:
-    C_DLLs="Z:\\"
-    # The x264 DLLs which you can grab from here:
-    # http://ffmpeg.zeranoe.com/builds/
-    # This is where I keep them, you will obviously need to change this value:
-    ffmpeg_path="Z:\\ffmpeg-win32-shared"
-    ffmpeg_include_dir = "%s\\include" % ffmpeg_path
-    ffmpeg_lib_dir = "%s\\lib" % ffmpeg_path
-    ffmpeg_bin_dir = "%s\\bin" % ffmpeg_path
-    # Same for vpx:
-    # http://code.google.com/p/webm/downloads/list
-    vpx_PATH="Z:\\vpx-vp8-debug-src-x86-win32mt-vs9-v1.0.0"
-    vpx_include_dir = "%s\\include" % vpx_PATH
-    vpx_lib_dir = "%s\\lib\\Win32" % vpx_PATH
-
-    def pkgconfig(*args):
-        def add_to_PATH(bindir):
-            import os
-            if os.environ['PATH'].find(bindir)<0:
-                os.environ['PATH'] = bindir + ';' + os.environ['PATH']
-            if bindir not in sys.path:
-                sys.path.append(bindir)
-        if args[0]=="x264":
-            add_to_PATH(ffmpeg_bin_dir)
-            return {'include_dirs': ["xpra/x264/win32", ffmpeg_include_dir],
-                    'library_dirs': ["xpra/x264/win32", ffmpeg_lib_dir],
-                    'libraries':    ["x264lib", "swscale", "avcodec", "avutil"]}
-        elif args[0]=="vpx":
-            add_to_PATH(ffmpeg_bin_dir)
-            return {'include_dirs': ["xpra/vpx/win32", vpx_include_dir, ffmpeg_include_dir],
-                    'library_dirs': ["xpra/vpx/win32", vpx_lib_dir, ffmpeg_lib_dir],
-                    'libraries':    ["vpxmt", "vpxmtd", "swscale", "avcodec", "avutil"]}
-        else:
-            raise Exception("unknown package config: %s" % str(args))
-
+    DLLs="Z:\\"
     import py2exe    #@UnresolvedImport
     assert py2exe is not None
     windows = [
                     {'script': 'win32/xpra_silent.py',                  'icon_resources': [(1, "win32/xpra.ico")],      "dest_base": "Xpra",},
                     {'script': 'xpra/gtk_view_keyboard.py',             'icon_resources': [(1, "win32/keyboard.ico")],  "dest_base": "GTK_Keyboard_Test",},
-                    {'script': 'xpra/scripts/client_launcher.py',       'icon_resources': [(1, "xpra.ico")],            "dest_base": "Xpra-Launcher",},
+                    {'script': 'xpra/scripts/client_launcher.py',       'icon_resources': [(1, "xpra.ico")],            "dest_base": "Xpra-Launcher",
+                  },
               ]
     console = [
                     {'script': 'xpra/scripts/main.py',                  'icon_resources': [(1, "xpra.ico")],            "dest_base": "Xpra_cmd",}
@@ -124,7 +136,7 @@ if sys.platform.startswith("win"):
     options = {
                     'py2exe': {
                                'unbuffered': True,
-                               'packages': packages,
+                               'packages':'encodings',
                                'includes': includes,
                                'dll_excludes': 'w9xpopen.exe'
                             }
@@ -134,11 +146,9 @@ if sys.platform.startswith("win"):
                    ('', ['README.xpra']),
                    ('', ['website.url']),
                    ('icons', glob.glob('icons\\*.*')),
-                   ('Microsoft.VC90.CRT', glob.glob('%s\\Microsoft.VC90.CRT\\*.*' % C_DLLs)),
-                   ('Microsoft.VC90.MFC', glob.glob('%s\\Microsoft.VC90.MFC\\*.*' % C_DLLs)),
-                   ('', glob.glob('%s\\bin\\*.dll' % ffmpeg_path)),
+                   ('Microsoft.VC90.CRT', glob.glob('%s\\Microsoft.VC90.CRT\\*.*' % DLLs)),
+                   ('Microsoft.VC90.MFC', glob.glob('%s\\Microsoft.VC90.MFC\\*.*' % DLLs)),
                ]
-
     extra_options = dict(
         windows = windows,
         console = console,
@@ -147,32 +157,13 @@ if sys.platform.startswith("win"):
         description = "Screen for X utility, allows you to connect to remote seamless sessions",
     )
 else:
-    # Tweaked from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/502261
-    def pkgconfig(*packages, **ekw):
-        flag_map = {'-I': 'include_dirs',
-                    '-L': 'library_dirs',
-                    '-l': 'libraries'}
-        cmd = ["pkg-config", "--libs", "--cflags", "%s" % (" ".join(packages),)]
-        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (output, _) = proc.communicate()
-        status = proc.wait()
-        if status!=0 and not ('clean' in sys.argv or 'sdist' in sys.argv):
-            raise Exception("call to pkg-config ('%s') failed" % (cmd,))
-        kw = dict(ekw)
-        if sys.version>='3':
-            output = output.decode('utf-8')
-        for token in output.split():
-            if token[:2] in flag_map:
-                kw.setdefault(flag_map.get(token[:2]), []).append(token[2:])
-            else: # throw others to extra_link_args
-                kw.setdefault('extra_link_args', []).append(token)
-            for k, v in kw.items(): # remove duplicates
-                kw[k] = list(set(v))
-        print("pkgconfig(%s,%s)=%s" % (packages, ekw, kw))
-        return kw
-
+    packages=["wimpiggy", "wimpiggy.lowlevel",
+              "parti", "parti.trays", "parti.addons", "parti.scripts",
+              "xpra", "xpra.scripts", "xpra.platform",
+              "xpra.xposix", "xpra.win32", "xpra.darwin",
+              ]
     scripts=["scripts/parti", "scripts/parti-repl",
-             "scripts/xpra", "scripts/xpra_launcher",
+             "scripts/xpra",
              ]
     data_files=[
                 ("share/man/man1", ["xpra.1", "parti.1"]),
@@ -180,8 +171,6 @@ else:
                 ("share/xpra", ["README.xpra", "COPYING"]),
                 ("share/wimpiggy", ["README.wimpiggy"]),
                 ("share/xpra/icons", glob.glob("icons/*")),
-                ("share/applications", ["xpra_launcher.desktop"]),
-                ("share/icons/xpra.png", ["xpra.png"])
                 ]
     extra_options = dict(
         packages = packages,
@@ -189,73 +178,6 @@ else:
         data_files = data_files,
         description = "A window manager library, a window manager, and a 'screen for X' utility",
     )
-
-
-
-ext_modules = []
-cmdclass = {}
-def cython_version_check():
-    from Cython.Compiler.Version import version as cython_version_string
-    cython_version = [int(part) for part in cython_version_string.split(".")]
-    # This was when the 'for 0 < i < 10:' syntax as added, bump upwards as
-    # necessary:
-    NEEDED_CYTHON = (0, 14, 0)
-    if tuple(cython_version) < NEEDED_CYTHON:
-        sys.exit("ERROR: Your version of Cython is too old to build this package\n"
-                 "You have version %s\n"
-                 "Please upgrade to Cython %s or better"
-                 % (cython_version_string,
-                    ".".join([str(part) for part in NEEDED_CYTHON])))
-def cython_add(extension):
-    global ext_modules, cmdclass
-    cython_version_check()
-    from Cython.Distutils import build_ext
-    ext_modules.append(extension)
-    cmdclass = {'build_ext': build_ext}
-
-from xpra.platform import XPRA_LOCAL_SERVERS_SUPPORTED
-if XPRA_LOCAL_SERVERS_SUPPORTED:
-    cython_add(Extension("wimpiggy.lowlevel.bindings",
-                ["wimpiggy/lowlevel/bindings.pyx"],
-                **pkgconfig("pygobject-2.0", "gdk-x11-2.0", "gtk+-x11-2.0",
-                            "xtst", "xfixes", "xcomposite", "xdamage", "xrandr")
-                ))
-    cython_add(Extension("xpra.wait_for_x_server",
-                ["xpra/wait_for_x_server.pyx"],
-                **pkgconfig("x11")
-                ))
-x264_ENABLED = True
-
-
-
-vpx_ENABLED = True
-filtered_args = []
-for arg in sys.argv:
-    if arg == "--without-x264":
-        x264_ENABLED = False
-    elif arg == "--without-vpx":
-        vpx_ENABLED = False
-    else:
-        filtered_args.append(arg)
-sys.argv = filtered_args
-
-if x264_ENABLED:
-    packages.append("xpra.x264")
-    cython_add(Extension("xpra.x264.codec",
-                ["xpra/x264/codec.pyx", "xpra/x264/x264lib.c"],
-                **pkgconfig("x264", "libswscale", "libavcodec")
-                ))
-if vpx_ENABLED:
-    packages.append("xpra.vpx")
-    cython_add(Extension("xpra.vpx.codec",
-                ["xpra/vpx/codec.pyx", "xpra/vpx/vpxlib.c"],
-                **pkgconfig("vpx", "libswscale", "libavcodec")
-                ))
-
-
-
-
-
 
 setup(
     name="parti-all",

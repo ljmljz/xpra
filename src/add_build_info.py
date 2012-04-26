@@ -10,7 +10,6 @@ import subprocess, sys
 import getpass
 import socket
 import platform
-import os.path
 
 def get_svn_props():
     props = {
@@ -23,7 +22,6 @@ def get_svn_props():
     if not out:
         print("could not get version information")
         return  props
-    out = out.decode('utf-8')
     pos = out.find(":")
     if pos>=0:
         out = out[pos+1:]
@@ -34,7 +32,7 @@ def get_svn_props():
     if not rev_str:
         print("could not parse version information from string: %s" % rev_str)
         return  props
-
+        
     rev = int(rev_str)
     props["REVISION"] = rev
     #find number of local files modified:
@@ -44,8 +42,8 @@ def get_svn_props():
     if not out:
         print("could not get status of local files")
         return  props
-
-    for line in out.decode('utf-8').splitlines():
+    
+    for line in out.splitlines():
         if sys.platform.startswith("win") and line.find("\\wcw"):
             """ windows is easily confused, symlinks for example - ignore them """
             continue
@@ -55,11 +53,9 @@ def get_svn_props():
     props["LOCAL_MODIFICATIONS"] = changes
     return props
 
-def save_properties_to_file(props):
-    filename = "./xpra/build_info.py"
-    if os.path.exists(filename):
-        os.unlink(filename)
-    f = open(filename, mode='w')
+def append_properties_to_file(props):
+    #append to build_info.py:
+    f = open("./xpra/build_info.py", 'a')
     for name,value in props.items():
         f.write("%s='%s'\n" % (name,value))
     f.close()
@@ -74,7 +70,11 @@ def main():
             }
     for k,v in get_svn_props().items():
         props[k] = v
-    save_properties_to_file(props)
+    append_properties_to_file(props)
+
+def append_svn_props():
+    props = get_svn_props()
+    append_properties_to_file(props)
 
 if __name__ == "__main__":
     main()

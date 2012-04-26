@@ -24,13 +24,10 @@ def get_gtk_keymap(ignore_keys=[None, "VoidSymbol"], add_if_missing=[]):
         by adding the keyval_name.
         We can also ignore some keys
     """
-    from wimpiggy.gobject_compat import import_gdk
-    gdk = import_gdk()
-    try:
-        keymap = gdk.keymap_get_default()
-    except:
-        keymap = None
-        return  []
+    import pygtk
+    pygtk.require("2.0")
+    import gtk
+    keymap = gtk.gdk.keymap_get_default()
     keycodes=[]
     max_entries = 1
     for i in range(0, 2**8):
@@ -38,7 +35,7 @@ def get_gtk_keymap(ignore_keys=[None, "VoidSymbol"], add_if_missing=[]):
         if entries:
             max_entries = max(max_entries, len(entries))
             for keyval, keycode, group, level in entries:
-                name = gdk.keyval_name(keyval)
+                name = gtk.gdk.keyval_name(keyval)
                 if name not in ignore_keys:
                     keycodes.append((nn(keyval), nn(name), nn(keycode), nn(group), nn(level)))
                 if name in add_if_missing:
@@ -48,14 +45,6 @@ def get_gtk_keymap(ignore_keys=[None, "VoidSymbol"], add_if_missing=[]):
         for name in add_if_missing:
             keycodes.append((0, name, 0, 0, 0))
     return keycodes
-
-
-def main():
-    gtk_keymap = get_gtk_keymap()
-    print("gtk_keymap: (keyval, name, keycode, group, level)\n%s" % ("\n".join([str(x) for x in gtk_keymap])))
-
-if __name__ == "__main__":
-    main()
 
 
 

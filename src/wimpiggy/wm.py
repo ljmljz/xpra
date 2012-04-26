@@ -245,9 +245,7 @@ class Wm(gobject.GObject):
     # This is in some sense the key entry point to the entire WM program.  We
     # have detected a new client window, and start managing it:
     def _manage_client(self, gdkwindow):
-        if gdkwindow in self._windows:
-            log.error("window %s is already managed!", gdkwindow)
-            return
+        assert gdkwindow not in self._windows
         try:
             win = WindowModel(self._root, gdkwindow)
         except Unmanageable:

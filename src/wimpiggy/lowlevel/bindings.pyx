@@ -438,16 +438,6 @@ def gdk_atom_objects_from_gdk_atom_array(atom_string):
         objects.append(PyGdkAtom_New(array[i]))
     return objects
 
-def gdk_atom_array_from_gdk_atom_objects(gdk_atom_objects):
-    cdef GdkAtom c_gdk_atom
-    cdef unsigned long gdk_atom_value
-    atom_array = []
-    for atom_object in gdk_atom_objects:
-        c_gdk_atom = PyGdkAtom_Get(atom_object)
-        gdk_atom_value = <unsigned long> c_gdk_atom
-        atom_array.append(gdk_atom_value)
-    return atom_array
-
 
 # Property handling:
 
@@ -1186,7 +1176,6 @@ cdef _ensure_extension_support(display_source, major, minor, extension,
             cminor = minor
             if (query_version)(get_xdisplay_for(display), &cmajor, &cminor):
                 # See X.org bug #14511:
-                log("found X11 extension %s with version %s.%s", extension, major, minor)
                 if major == cmajor and minor <= cminor:
                     display.set_data(key, True)
                 else:
@@ -1223,14 +1212,6 @@ def _ensure_XComposite_support(display_source):
     _ensure_extension_support(display_source, 0, 2, "Composite",
                               XCompositeQueryExtension,
                               XCompositeQueryVersion)
-
-def displayHasXComposite(display_source):
-    try:
-        _ensure_XComposite_support(display_source)
-        return  True
-    except Exception, e:
-        log.error("%s", e)
-    return False
 
 def xcomposite_redirect_window(window):
     _ensure_XComposite_support(window)

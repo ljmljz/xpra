@@ -4,8 +4,7 @@
 # Parti is released under the terms of the GNU GPL v2, or, at your option, any
 # later version. See the file COPYING for details.
 
-from wimpiggy.gobject_compat import import_gobject
-gobject = import_gobject()
+import gobject
 
 from wimpiggy.util import n_arg_signal
 from wimpiggy.log import Logger
@@ -111,6 +110,9 @@ class XpraClientBase(gobject.GObject):
         if self.jpegquality:
             capabilities["jpeg"] = self.jpegquality
         capabilities["packet_size"] = True
+        #will be removed (only for compatibility with old versions):
+        capabilities["dynamic_compression"] = True
+        capabilities["__prerelease_version"] = xpra.__version__
         return capabilities
 
     def send(self, packet):
@@ -187,30 +189,15 @@ class GLibXpraClient(XpraClientBase):
 
     def __init__(self, conn, opts):
         XpraClientBase.__init__(self, opts)
-        self.exit_code = 0
         self.ready(conn)
         self.send_hello()
 
     def run(self):
         import glib
-        try:
-            glib.threads_init()
-        except AttributeError:
-            #old versions of glib may not have this method
-            pass
-        try:
-            gobject.threads_init()
-        except AttributeError:
-            #old versions of gobject may not have this method
-            pass
+        glib.threads_init()
+        gobject.threads_init()
         self.glib_mainloop = glib.MainLoop()
         self.glib_mainloop.run()
-        return  self.exit_code
-
-    def make_hello(self, challenge_response=None):
-        capabilities = XpraClientBase.make_hello(self, challenge_response)
-        capabilities["keyboard"] = False
-        return capabilities
 
     def quit(self, *args):
         self.glib_mainloop.quit()
@@ -225,7 +212,6 @@ class ScreenshotXpraClient(GLibXpraClient):
     def __init__(self, conn, opts, screenshot_filename):
         self.screenshot_filename = screenshot_filename
         def screenshot_timeout(*args):
-            self.exit_code = 1
             log.error("timeout: did not receive the screenshot")
             self.quit()
         gobject.timeout_add(10*1000, screenshot_timeout)
@@ -245,7 +231,7 @@ class ScreenshotXpraClient(GLibXpraClient):
         self._packet_handlers["screenshot"] = self._process_screenshot
 
     def make_hello(self, challenge_response=None):
-        capabilities = GLibXpraClient.make_hello(self, challenge_response)
+        capabilities = XpraClientBase.make_hello(self, challenge_response)
         capabilities["screenshot_request"] = True
         return capabilities
 
@@ -257,7 +243,6 @@ class VersionXpraClient(GLibXpraClient):
 
     def __init__(self, conn, opts):
         def version_timeout(*args):
-            self.exit_code = 1
             log.error("timeout: did not receive the version")
             self.quit()
         gobject.timeout_add(10*1000, version_timeout)
@@ -270,21 +255,7 @@ class VersionXpraClient(GLibXpraClient):
         self.quit()
 
     def make_hello(self, challenge_response=None):
-        capabilities = GLibXpraClient.make_hello(self, challenge_response)
+        capabilities = XpraClientBase.make_hello(self, challenge_response)
         log.debug("make_hello(%s) adding version_request to %s", challenge_response, capabilities)
         capabilities["version_request"] = True
         return capabilities
-
-class StopXpraClient(GLibXpraClient):
-    """ stop a server """
-
-    def __init__(self, conn, opts):
-        def stop_timeout(*args):
-            self.exit_code = 1
-            log.error("timeout: server did not disconnect us")
-            self.quit()
-        gobject.timeout_add(5*1000, stop_timeout)
-        GLibXpraClient.__init__(self, conn, opts)
-
-    def _process_hello(self, packet):
-        self.send(["shutdown-server"])

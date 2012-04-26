@@ -264,7 +264,7 @@ class BaseWindowModel(AutoPropGObjectMixin, gobject.GObject):
         try:
             trap.call(setup)
         except XError, e:
-            raise Unmanageable(e)
+            raise Unmanageable, e
 
     def _forward_contents_changed(self, obj, event):
         self.emit("client-contents-changed", event)
@@ -302,19 +302,18 @@ class BaseWindowModel(AutoPropGObjectMixin, gobject.GObject):
         self._internal_set_property("transient-for", transient_for)
 
         window_types = self.prop_get("_NET_WM_WINDOW_TYPE", ["atom"])
-        if not window_types:
-            window_type = self._guess_window_type(transient_for)
-            window_types = [gtk.gdk.atom_intern(window_type)]
-        self._internal_set_property("window-type", window_types)
-
-    def _guess_window_type(self, transient_for):
-        if transient_for is not None:
-            # EWMH says that even if it's transient-for, we MUST check to
-            # see if it's override-redirect (and if so treat as NORMAL).
-            # But we wouldn't be here if this was override-redirect.
-            # (OverrideRedirectWindowModel overrides this method)
-            return "_NET_WM_TYPE_DIALOG"
-        return "_NET_WM_WINDOW_TYPE_NORMAL"
+        if window_types:
+            self._internal_set_property("window-type", window_types)
+        else:
+            if transient_for is not None:
+                # EWMH says that even if it's transient-for, we MUST check to
+                # see if it's override-redirect (and if so treat as NORMAL).
+                # But we wouldn't be here if this was override-redirect.
+                assume_type = "_NET_WM_TYPE_DIALOG"
+            else:
+                assume_type = "_NET_WM_WINDOW_TYPE_NORMAL"
+            self._internal_set_property("window-type",
+                              [gtk.gdk.atom_intern(assume_type)])
 
 
 gobject.type_register(BaseWindowModel)
@@ -338,16 +337,13 @@ class OverrideRedirectWindowModel(BaseWindowModel):
             # already generated, and our request for that event is too late!
             # So double check now, *after* putting in our request:
             if not is_mapped(self.client_window):
-                raise Unmanageable("window already unmapped")
+                raise Unmanageable, "window already unmapped"
 
             self._read_initial_properties()
         try:
             trap.call(setup)
         except XError, e:
-            raise Unmanageable(e)
-
-    def _guess_window_type(self, transient_for):
-        return "_NET_WM_WINDOW_TYPE_NORMAL"
+            raise Unmanageable, e
 
     def do_wimpiggy_unmap_event(self, event):
         self.unmanage()
@@ -527,7 +523,7 @@ class WindowModel(BaseWindowModel):
             trap.call(setup_client)
             trap.call(self.client_window.get_geometry)
         except XError, e:
-            raise Unmanageable(e)
+            raise Unmanageable, e
         self._setup_done = True
 
     def prop_get(self, key, type, ignore_errors=False):
@@ -856,13 +852,9 @@ class WindowModel(BaseWindowModel):
         for mutable in ["WM_HINTS", "WM_NORMAL_HINTS",
                         "WM_NAME", "_NET_WM_NAME",
                         "WM_ICON_NAME", "_NET_WM_ICON_NAME",
-                        "_NET_WM_STRUT", "_NET_WM_STRUT_PARTIAL"]:
+                        "_NET_WM_STRUT", "_NET_WM_STRUT_PARTIAL",
+                        "_NET_WM_ICON"]:
             self._handle_property_change(mutable)
-        for mutable in ["_NET_WM_ICON"]:
-            try:
-                self._handle_property_change(mutable)
-            except:
-                log.error("error reading initial property %s", mutable, exc_info=True)
 
     ################################
     # Property setting

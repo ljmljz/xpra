@@ -13,8 +13,6 @@ AllowUNCPath=false
 VersionInfoVersion=0.1.0
 VersionInfoCompany=devloop
 VersionInfoDescription=screen for X
-WizardImageFile=win32\xpra.bmp
-LicenseFile=COPYING
 
 [Dirs]
 Name: {app}; Flags: uninsalwaysuninstall;
@@ -28,8 +26,3 @@ Name: "{group}\Xpra Homepage"; Filename: "{app}\website.url"
 
 [Run]
 Filename: {app}\Xpra-Launcher.exe; Description: {cm:LaunchProgram,xpra}; Flags: nowait postinstall skipifsilent
-
-[Registry]
-Root: HKCR; Subkey: ".xpra"; ValueType: string; ValueName: ""; ValueData: "XpraSession"; Flags: uninsdeletevalue
-Root: HKCR; Subkey: "XpraSession"; ValueType: string; ValueName: ""; ValueData: "Xpra Session File"; Flags: uninsdeletekey
-Root: HKCR; Subkey: "XpraSession\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Xpra-Launcher.exe"" ""%1"""; Flags: uninsdeletekey

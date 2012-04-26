@@ -19,20 +19,13 @@ import socket
 from xpra.wait_for_x_server import wait_for_x_server        #@UnresolvedImport
 from xpra.dotxpra import DotXpra, ServerSockInUse
 
-o0117 = 79
-o0177 = 127
-o0666 = 438
-o0700 = 448
-
 _cleanups = []
 def run_cleanups():
     for c in _cleanups:
         try:
             c()
-        except:
-            print("error running cleanup %s" % c)
-            import traceback
-            traceback.print_exception(*sys.exc_info())
+        except Exception, e:
+            print("error running cleanup %s: %s" % (c, e))
 
 def deadly_signal(signum, frame):
     print("got signal %s, exiting" % signum)
@@ -145,9 +138,9 @@ def create_unix_domain_socket(sockpath, mmap_group):
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     #bind the socket, using umask to set the correct permissions
     if mmap_group:
-        orig_umask = os.umask(o0117) #660
+        orig_umask = os.umask(0117) #660
     else:
-        orig_umask = os.umask(o0177) #600
+        orig_umask = os.umask(0177) #600
     listener.bind(sockpath)
     os.umask(orig_umask)
     return listener
@@ -226,7 +219,7 @@ def run_server(parser, opts, mode, xpra_file, extra_args):
         # Do some work up front, so any errors don't get lost.
         if os.path.exists(logpath):
             os.rename(logpath, logpath + ".old")
-        logfd = os.open(logpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, o0666)
+        logfd = os.open(logpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0666)
         assert logfd > 2
         os.chdir("/")
 
@@ -253,10 +246,7 @@ def run_server(parser, opts, mode, xpra_file, extra_args):
     # Unix is a little silly sometimes:
     umask = os.umask(0)
     os.umask(umask)
-    if hasattr(os, "fchmod"):
-        os.fchmod(scriptfile.fileno(), o0700 & ~umask)
-    else:
-        os.chmod(scriptpath, o0700 & ~umask)
+    os.fchmod(scriptfile.fileno(), 0700 & ~umask)
     scriptfile.write(xpra_runner_shell_script(xpra_file, starting_dir))
     scriptfile.close()
 
@@ -288,11 +278,7 @@ def run_server(parser, opts, mode, xpra_file, extra_args):
 
     # Whether we spawned our server or not, it is now running -- or at least
     # starting.  First wait for it to start up:
-    try:
-        wait_for_x_server(display_name, 3) # 3s timeout
-    except Exception, e:
-        sys.stderr.write("%s\n" % e)
-        return
+    wait_for_x_server(display_name, 3) # 3s timeout
     # Now we can safely load gtk and connect:
     assert "gtk" not in sys.modules
     import gtk
@@ -319,10 +305,6 @@ def run_server(parser, opts, mode, xpra_file, extra_args):
     if xvfb_pid is not None:
         save_pid(xvfb_pid)
 
-    from xpra.server import can_run_server, XpraServer
-    if not can_run_server():
-        return
-
     sockets = []
     #print("creating server socket %s" % sockpath)
     sockets.append(create_unix_domain_socket(sockpath, opts.mmap_group))
@@ -335,12 +317,8 @@ def run_server(parser, opts, mode, xpra_file, extra_args):
     _cleanups.append(cleanup_socket)
     tcp_socket = None
     if opts.bind_tcp:
-        try:
-            tcp_socket = create_tcp_socket(parser, opts.bind_tcp)
-            sockets.append(tcp_socket)
-        except Exception, e:
-            print("cannot start - failed to create tcp socket: %s" % e)
-            return
+        tcp_socket = create_tcp_socket(parser, opts.bind_tcp)
+        sockets.append(tcp_socket)
     def cleanup_tcp_socket():
         if tcp_socket:
             print("closing tcp socket")
@@ -351,7 +329,8 @@ def run_server(parser, opts, mode, xpra_file, extra_args):
     _cleanups.append(cleanup_tcp_socket)
 
     # This import is delayed because the module depends on gtk:
-    app = XpraServer(clobber, sockets, opts)
+    import xpra.server
+    app = xpra.server.XpraServer(clobber, sockets, opts)
 
     child_reaper = ChildReaper(app, opts.exit_with_children)
     # Always register the child reaper, because even if exit_with_children is

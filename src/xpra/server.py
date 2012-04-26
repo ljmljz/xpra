@@ -18,18 +18,12 @@ import cairo
 import sys
 import hmac
 import uuid
-try:
-    from StringIO import StringIO   #@UnusedImport
-except:
-    from io import StringIO         #@UnresolvedImport @Reimport
+import StringIO
 import os
 import time
 import ctypes
 from threading import Thread
-try:
-    from queue import Queue, Empty  #@UnresolvedImport @UnusedImport (python3)
-except:
-    from Queue import Queue, Empty  #@Reimport
+import Queue
 from math import log as mathlog
 from math import sqrt
 def logp2(x):
@@ -40,8 +34,7 @@ from wimpiggy.util import (AdHocStruct,
                            one_arg_signal,
                            gtk_main_quit_really,
                            gtk_main_quit_on_fatal_exceptions_enable)
-from wimpiggy.lowlevel import (displayHasXComposite,       #@UnresolvedImport
-                               get_rectangle_from_region,   #@UnresolvedImport
+from wimpiggy.lowlevel import (get_rectangle_from_region,   #@UnresolvedImport
                                xtest_fake_key,              #@UnresolvedImport
                                xtest_fake_button,           #@UnresolvedImport
                                set_key_repeat_rate,         #@UnresolvedImport
@@ -55,9 +48,7 @@ from wimpiggy.lowlevel import (displayHasXComposite,       #@UnresolvedImport
                                has_randr, get_screen_sizes, #@UnresolvedImport
                                set_screen_size,             #@UnresolvedImport
                                get_screen_size,             #@UnresolvedImport
-                               init_x11_filter,             #@UnresolvedImport
-                               get_xatom                    #@UnresolvedImport
-                               )
+                               init_x11_filter)             #@UnresolvedImport
 from wimpiggy.prop import prop_set
 from wimpiggy.window import OverrideRedirectWindowModel, Unmanageable
 from wimpiggy.keys import grok_modifier_map
@@ -73,7 +64,7 @@ from xpra.keys import mask_to_names, get_gtk_keymap, DEFAULT_MODIFIER_NUISANCE, 
 from xpra.xkbhelper import do_set_keymap, set_all_keycodes, set_modifiers_from_meanings, clear_modifiers, set_modifiers_from_keycodes
 from xpra.xposix.xclipboard import ClipboardProtocolHelper
 from xpra.xposix.xsettings import XSettingsManager
-from xpra.scripts.main import ENCODINGS, DEFAULT_ENCODING
+from xpra.scripts.main import ENCODINGS
 from xpra.version_util import is_compatible_with
 
 MAX_CONCURRENT_CONNECTIONS = 20
@@ -228,12 +219,11 @@ class ServerSource(object):
         self._mmap = mmap
         self._mmap_size = mmap_size
         protocol.source = self
-        self._damage_request_queue = Queue()
-        self._damage_data_queue = Queue()
-        self._damage_packet_queue = Queue(2)
+        self._damage_request_queue = Queue.Queue()
+        self._damage_data_queue = Queue.Queue()
+        self._damage_packet_queue = Queue.Queue(2)
 
         self._closed = False
-        self._on_close = []
 
         def start_daemon_thread(target, name):
             t = Thread(target=target)
@@ -248,13 +238,6 @@ class ServerSource(object):
         self._closed = True
         self._damage_request_queue.put(None, block=False)
         self._damage_data_queue.put(None, block=False)
-        for cb in self._on_close:
-            try:
-                log("calling %s", cb)
-                cb()
-            except:
-                log.error("error on close callback %s", cb, exc_info=True)
-        self._on_close = []
 
     def _have_more(self):
         return not self._closed and bool(self._ordinary_packets) or not self._damage_packet_queue.empty()
@@ -267,7 +250,7 @@ class ServerSource(object):
         else:
             try:
                 packet = self._damage_packet_queue.get(False)
-            except Empty:
+            except Queue.Empty:
                 packet = None
         return packet, packet is not None and self._have_more()
 
@@ -407,10 +390,8 @@ class ServerSource(object):
                 log("damage_to_data: dropping request with sequence=%s", sequence)
                 continue
             regions = []
-            coding = self._encoding
-            is_or = isinstance(window, OverrideRedirectWindowModel)
             try:
-                if is_or:
+                if (isinstance(window, OverrideRedirectWindowModel)):
                     (_, _, ww, wh) = window.get_property("geometry")
                 else:
                     ww, wh = window.get_property("actual-size")
@@ -424,8 +405,7 @@ class ServerSource(object):
                         (x, y, w, h) = get_rectangle_from_region(damage)
                         pixel_count += w*h
                         #favor full screen updates over many regions:
-                        #x264 and vpx need full screen updates all the time
-                        if pixel_count+4096*len(regions)>=full_pixels*9/10 or self._encoding in ["x264", "vpx"]:
+                        if pixel_count+4096*len(regions)>=full_pixels*9/10:
                             regions = [(0, 0, ww, wh, True)]
                             break
                         regions.append((x, y, w, h, False))
@@ -437,9 +417,9 @@ class ServerSource(object):
             except Exception, e:
                 log.error("damage_to_data: error processing region %s: %s", damage, e)
                 continue
-            gobject.idle_add(self._process_damage_regions, wid, window, ww, wh, regions, coding, sequence, options)
+            gobject.idle_add(self._process_damage_regions, wid, window, ww, wh, regions, sequence, options)
 
-    def _process_damage_regions(self, wid, window, ww, wh, regions, coding, sequence, options):
+    def _process_damage_regions(self, wid, window, ww, wh, regions, sequence, options):
         if self._damage_cancelled.get(wid, 0)>=sequence:
             log("process_damage_regions: dropping damage request with sequence=%s", sequence)
             return
@@ -457,7 +437,7 @@ class ServerSource(object):
             if full_window:
                 log("process_damage_regions: sending full window: %s", pixmap.get_size())
                 w, h = pixmap.get_size()
-            data = _get_rgb_rawdata(wid, pixmap, x, y, w, h, coding, sequence, options)
+            data = _get_rgb_rawdata(wid, pixmap, x, y, w, h, self._encoding, sequence, options)
             if data:
                 log("process_damage_regions: adding pixel data %s to queue, queue size=%s", data[:6], self._damage_data_queue.qsize())
                 self._damage_data_queue.put(data)
@@ -492,10 +472,9 @@ class ServerSource(object):
                 data = mmap_data
         #encode to jpeg/png:
         if coding in ["jpeg", "png"]:
-            assert coding in ENCODINGS
             import Image
             im = Image.fromstring("RGB", (w, h), data, "raw", "RGB", rowstride)
-            buf = StringIO()
+            buf = StringIO.StringIO()
             if self._encoding=="jpeg":
                 q = self._protocol.jpegquality
                 if options and "jpegquality" in options:
@@ -508,22 +487,6 @@ class ServerSource(object):
                 im.save(buf, self._encoding.upper())
             data = buf.getvalue()
             buf.close()
-        elif coding=="x264":
-            assert coding in ENCODINGS
-            assert x==0 and y==0
-            #x264 needs sizes divisible by 2:
-            w = w & 0xFFFE
-            h = h & 0xFFFE
-            from xpra.x264.codec import ENCODERS as x264_encoders, Encoder as x264Encoder     #@UnresolvedImport
-            data = self.video_encode(x264_encoders, x264Encoder, wid, x, y, w, h, coding, data, rowstride)
-        elif coding=="vpx":
-            assert coding in ENCODINGS
-            assert x==0 and y==0
-            from xpra.vpx.codec import ENCODERS as vpx_encoders, Encoder as vpxEncoder     #@UnresolvedImport @Reimport
-            data = self.video_encode(vpx_encoders, vpxEncoder, wid, x, y, w, h, coding, data, rowstride)
-        else:
-            assert coding in ["rgb24", "mmap"]
-
         #check cancellation list again since the code above may take some time:
         #but always send mmap data so we can reclaim the space!
         if coding!="mmap" and sequence>=0 and self._damage_cancelled.get(wid, 0)>=sequence:
@@ -533,43 +496,6 @@ class ServerSource(object):
         packet = ["draw", wid, x, y, w, h, coding, data, self._damage_packet_sequence, rowstride]
         self._damage_packet_sequence += 1
         return packet
-
-    def video_encode(self, encoders, factory, wid, x, y, w, h, coding, data, rowstride):
-        assert coding in ENCODINGS
-        assert x==0 and y==0
-        time_before = time.clock()
-        encoder = encoders.get(wid)
-        if encoder and (encoder.get_width()!=w or encoder.get_height()!=h):
-            log("%s: window dimensions have changed from %s to %s", (coding, encoder.get_width(), encoder.get_height()), (w, h))
-            encoder.clean()
-            encoder.init(w, h)
-        if encoder is None:
-            log("%s: new encoder", coding)
-            encoder = factory()
-            encoder.init(w, h)
-            encoders[wid] = encoder
-            def close_encoder():
-                encoder.clean()
-                del encoders[wid]
-            self._on_close.append(close_encoder)
-        log("%s: compress_image(%s bytes, %s)", coding, len(data), rowstride)
-        err, size, data = encoder.compress_image(data, rowstride)
-        if err!=0:
-            log.error("%s: ouch, compression error %s", coding, err)
-            return None
-        #time_after = time.clock()
-        #encoding_latency = 1000 * (time_after - time_before)
-        # Do not allow encoding latency to go higher than 50ms
-        #if encoding_latency > 50:
-        #    log("%s encoding took %d milliseconds, speeding up encoding", coding, encoding_latency)
-        #    encoder.increase_encoding_speed()
-        #elif encoding_latency < 5:
-        #    log("%s encoding took %d milliseconds, using more costly encoding params", coding, encoding_latency)
-        #    encoder.decrease_encoding_speed()
-        log("%s: compressed data(%sx%s) = %s, type=%s, first 10 bytes: %s", coding, w, h, size, type(data), [ord(c) for c in data[:10]])
-        return data
-
-
 
     def _mmap_send(self, data):
         #This is best explained using diagrams:
@@ -638,14 +564,6 @@ class ServerSource(object):
         return data
 
 
-def can_run_server():
-    root = gtk.gdk.get_default_root_window()
-    if not displayHasXComposite(root):
-        log.error("Xpra is a compositing manager, it cannot use a display which lacks the XComposite extension!")
-        return False
-    return True
-
-
 class XpraServer(gobject.GObject):
     __gsignals__ = {
         "wimpiggy-child-map-event": one_arg_signal,
@@ -655,7 +573,6 @@ class XpraServer(gobject.GObject):
     def __init__(self, clobber, sockets, opts):
         gobject.GObject.__init__(self)
         init_x11_filter()
-        self.init_x11_atoms()
 
         self.start_time = time.time()
 
@@ -676,7 +593,7 @@ class XpraServer(gobject.GObject):
         self._server_source = None
 
         self.supports_mmap = opts.mmap
-        self.encoding = opts.encoding or DEFAULT_ENCODING
+        self.encoding = opts.encoding or "rgb24"
         assert self.encoding in ENCODINGS
         self.png_window_icons = False
         self.session_name = opts.session_name
@@ -719,11 +636,10 @@ class XpraServer(gobject.GObject):
         self.xkbmap_mod_managed = None
         self.keycode_translation = {}
         self.keymap_changing = False
-        self.keyboard = True
         self.keyboard_sync = True
         self.key_repeat_delay = -1
         self.key_repeat_interval = -1
-        self.encodings = []
+        self.encodings = ["rgb24"]
         self.mmap = None
         self.mmap_size = 0
 
@@ -793,28 +709,6 @@ class XpraServer(gobject.GObject):
         for sock in sockets:
             self.add_listen_socket(sock)
 
-    def init_x11_atoms(self):
-        #some applications (like openoffice), do not work properly
-        #if some x11 atoms aren't defined, so we define them in advance:
-        for atom_name in ["_NET_WM_WINDOW_TYPE",
-                          "_NET_WM_WINDOW_TYPE_NORMAL",
-                          "_NET_WM_WINDOW_TYPE_DESKTOP",
-                          "_NET_WM_WINDOW_TYPE_DOCK",
-                          "_NET_WM_WINDOW_TYPE_TOOLBAR",
-                          "_NET_WM_WINDOW_TYPE_MENU",
-                          "_NET_WM_WINDOW_TYPE_UTILITY",
-                          "_NET_WM_WINDOW_TYPE_SPLASH",
-                          "_NET_WM_WINDOW_TYPE_DIALOG",
-                          "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
-                          "_NET_WM_WINDOW_TYPE_POPUP_MENU",
-                          "_NET_WM_WINDOW_TYPE_TOOLTIP",
-                          "_NET_WM_WINDOW_TYPE_NOTIFICATION",
-                          "_NET_WM_WINDOW_TYPE_COMBO",
-                          "_NET_WM_WINDOW_TYPE_DND",
-                          "_NET_WM_WINDOW_TYPE_NORMAL"
-                          ]:
-            get_xatom(atom_name)
-
     def reset_statistics(self):
         self.client_latency = maxdeque(maxlen=100)
         self.client_load = None
@@ -849,24 +743,21 @@ class XpraServer(gobject.GObject):
 
                 #now set all the keycodes:
                 self.clean_keyboard_state()
-                self.keycode_translation = {}
-                self._keynames_for_mod = None
-                if self.keyboard:
-                    assert self.xkbmap_keycodes and len(self.xkbmap_keycodes)>0, "client failed to provide xkbmap_keycodes!"
-                    self.keycode_translation = set_all_keycodes(self.xkbmap_keycodes, self.xkbmap_initial)
-    
-                    #now set the new modifier mappings:
-                    self.clean_keyboard_state()
-                    log.debug("going to set modifiers, xkbmap_mod_meanings=%s, len(xkbmap_keycodes)=%s", self.xkbmap_mod_meanings, len(self.xkbmap_keycodes or []))
-                    if self.xkbmap_mod_meanings:
-                        #Unix-like OS provides modifier meanings:
-                        self._keynames_for_mod = set_modifiers_from_meanings(self.xkbmap_mod_meanings)
-                    elif self.xkbmap_keycodes:
-                        #non-Unix-like OS provides just keycodes for now:
-                        self._keynames_for_mod = set_modifiers_from_keycodes(self.xkbmap_keycodes)
-                    else:
-                        log.error("missing both xkbmap_mod_meanings and xkbmap_keycodes, modifiers will probably not work as expected!")
-                    log.debug("keyname_for_mod=%s", self._keynames_for_mod)
+                assert self.xkbmap_keycodes and len(self.xkbmap_keycodes)>0, "client failed to provide xkbmap_keycodes!"
+                self.keycode_translation = set_all_keycodes(self.xkbmap_keycodes, self.xkbmap_initial)
+
+                #now set the new modifier mappings:
+                self.clean_keyboard_state()
+                log.debug("going to set modifiers, xkbmap_mod_meanings=%s, len(xkbmap_keycodes)=%s", self.xkbmap_mod_meanings, len(self.xkbmap_keycodes or []))
+                if self.xkbmap_mod_meanings:
+                    #Unix-like OS provides modifier meanings:
+                    self._keynames_for_mod = set_modifiers_from_meanings(self.xkbmap_mod_meanings)
+                elif self.xkbmap_keycodes:
+                    #non-Unix-like OS provides just keycodes for now:
+                    self._keynames_for_mod = set_modifiers_from_keycodes(self.xkbmap_keycodes)
+                else:
+                    log.error("missing both xkbmap_mod_meanings and xkbmap_keycodes, modifiers will probably not work as expected!")
+                log.debug("keyname_for_mod=%s", self._keynames_for_mod)
             except:
                 log.error("error setting xmodmap", exc_info=True)
         finally:
@@ -899,11 +790,6 @@ class XpraServer(gobject.GObject):
         return self._upgrading
 
     def cleanup(self, *args):
-        if self.notifications_forwarder:
-            try:
-                self.notifications_forwarder.release()
-            except Exception, e:
-                log.error("failed to release dbus notification forwarder: %s", e)
         self.disconnect("shutting down")
 
     def _new_connection(self, listener, *args):
@@ -960,7 +846,7 @@ class XpraServer(gobject.GObject):
     def notify_callback(self, dbus_id, nid, app_name, replaces_nid, app_icon, summary, body, expire_timeout):
         log("notify_callback(%s,%s,%s,%s,%s,%s,%s,%s) send_notifications=%s", dbus_id, nid, app_name, replaces_nid, app_icon, summary, body, expire_timeout, self.send_notifications)
         if self.send_notifications:
-            self._send(["notify_show", dbus_id, int(nid), str(app_name), int(replaces_nid), str(app_icon), str(summary), str(body), int(expire_timeout)])
+            self._send(["notify_show", dbus_id, int(nid), str(app_name), int(replaces_nid), str(app_icon), str(summary), str(body), long(expire_timeout)])
 
     def notify_close_callback(self, nid):
         log("notify_close_callback(%s)", nid)
@@ -1060,7 +946,7 @@ class XpraServer(gobject.GObject):
                             h = MAX_SIZE
                         log("scaling window icon down to %sx%s", w, h)
                         img = img.resize((w,h), Image.ANTIALIAS)
-                    output = StringIO()
+                    output = StringIO.StringIO()
                     img.save(output, 'PNG')
                     raw_data = output.getvalue()
                     return {"icon": (w, h, "png", str(raw_data)) }
@@ -1119,8 +1005,6 @@ class XpraServer(gobject.GObject):
                 so we try to find the matching modifier in the currently pressed keys (keys_pressed)
                 to make sure we unpress the right one.
         """
-        if not self.keyboard:
-            return
         if not self._keynames_for_mod:
             log.debug("make_keymask_match: ignored as keynames_for_mod not assigned yet")
             return
@@ -1418,7 +1302,7 @@ class XpraServer(gobject.GObject):
         log.debug("process_hello: capabilities=%s", capabilities)
         log.info("Handshake complete; enabling connection")
         if capabilities.get("version_request", False):
-            capabilities = {"start_time" : int(self.start_time),
+            capabilities = {"start_time" : long(self.start_time),
                             "platform" : sys.platform,
                             "version" : xpra.__version__}
             packet = ["hello", capabilities]
@@ -1452,7 +1336,7 @@ class XpraServer(gobject.GObject):
         if self._protocol is not None:
             self.disconnect("new valid connection received")
         self.reset_statistics()
-        self.encodings = capabilities.get("encodings", [])
+        self.encodings = capabilities.get("encodings", ["rgb24"])
         self._set_encoding(capabilities.get("encoding", None))
         #mmap:
         self.close_mmap()
@@ -1496,7 +1380,6 @@ class XpraServer(gobject.GObject):
         self.send_hello(capabilities)
         if "jpeg" in capabilities:
             self._protocol.jpegquality = capabilities["jpeg"]
-        self.keyboard = bool(capabilities.get("keyboard", True))
         self.keyboard_sync = bool(capabilities.get("keyboard_sync", True))
         key_repeat = capabilities.get("key_repeat", None)
         if key_repeat:
@@ -1534,7 +1417,7 @@ class XpraServer(gobject.GObject):
         # that the earliest override-redirect windows will be on the bottom,
         # which is usually how things work.  (I don't know that anyone cares
         # about this kind of correctness at all, but hey, doesn't hurt.)
-        for wid in sorted(self._id_to_window.keys()):
+        for wid in sorted(self._id_to_window.iterkeys()):
             window = self._id_to_window[wid]
             if isinstance(window, OverrideRedirectWindowModel):
                 self._send_new_or_window_packet(window)
@@ -1560,20 +1443,32 @@ class XpraServer(gobject.GObject):
             capabilities["session_name"] = self.session_name
         if self.mmap_size>0:
             capabilities["mmap_enabled"] = True
-        capabilities["start_time"] = int(self.start_time)
+        capabilities["start_time"] = long(self.start_time)
         capabilities["toggle_cursors_bell_notify"] = True
         capabilities["notifications"] = self.notifications_forwarder is not None
+        #this is to keep compatibility with v0.0.7.36 only and will be removed
+        #as these are now always available:
         capabilities["png_window_icons"] = "png" in ENCODINGS
+        capabilities["keyboard_as_properties"] = True
+        capabilities["raw_keycodes_feature"] = True
+        capabilities["raw_keycodes_full"] = True
+        capabilities["focus_modifiers_feature"] = True
+        capabilities["dynamic_compression"] = True
+        capabilities["packet_size"] = True
+        capabilities["damage_sequence"] = True
+        capabilities["ping"] = True
+        capabilities["cursors"] = True
+        capabilities["bell"] = True
         if "key_repeat" in client_capabilities:
             capabilities["key_repeat_modifiers"] = True
         self._send(["hello", capabilities])
 
     def send_ping(self):
-        self._send(["ping", int(1000*time.time())])
+        self._send(["ping", long(1000*time.time())])
 
     def _process_ping_echo(self, proto, packet):
         (echoedtime, l1, l2, l3, sl) = packet[1:6]
-        diff = int(1000*time.time()-echoedtime)
+        diff = long(1000*time.time()-echoedtime)
         self.client_latency.append(diff)
         self.client_load = (l1, l2, l3)
         self.server_latency = sl
@@ -1583,7 +1478,7 @@ class XpraServer(gobject.GObject):
         echotime = packet[1]
         try:
             (fl1, fl2, fl3) = os.getloadavg()
-            l1,l2,l3 = int(fl1*1000), int(fl2*1000), int(fl3*1000)
+            l1,l2,l3 = long(fl1*1000), long(fl2*1000), long(fl3*1000)
         except:
             l1,l2,l3 = 0,0,0
         cl = -1
@@ -1635,7 +1530,7 @@ class XpraServer(gobject.GObject):
                 tx = x-minx
                 ty = y-miny
                 image.paste(window_image, (tx, ty))
-            buf = StringIO()
+            buf = StringIO.StringIO()
             image.save(buf, "png")
             data = buf.getvalue()
             buf.close()
@@ -1670,11 +1565,7 @@ class XpraServer(gobject.GObject):
                 self._server_source.close()
                 self._server_source = None
         #so it is now safe to clear them:
-        #(this may fail during shutdown - which is ok)
-        try:
-            self._clear_keys_pressed()
-        except:
-            pass
+        self._clear_keys_pressed()
         self._focus(0, [])
         log.info("Connection lost")
         self.close_mmap()
@@ -1700,7 +1591,7 @@ class XpraServer(gobject.GObject):
         settings = packet[1]
         old_settings = dict(self._settings)
         self._settings.update(settings)
-        for k, v in settings.items():
+        for k, v in settings.iteritems():
             if k not in old_settings or v != old_settings[k]:
                 def root_set(p):
                     prop_set(gtk.gdk.get_default_root_window(),
@@ -1796,9 +1687,6 @@ class XpraServer(gobject.GObject):
 
 
     def _process_key_action(self, proto, packet):
-        if not self.keyboard:
-            log.info("ignoring key action packet since keyboard is turned off")
-            return
         (wid, keyname, pressed, modifiers, keyval, _, client_keycode) = packet[1:8]
         keycode = self.keycode_translation.get(client_keycode, client_keycode)
         #currently unused: (group, is_modifier) = packet[8:10]
@@ -1865,9 +1753,6 @@ class XpraServer(gobject.GObject):
             self.keys_repeat_timers[keycode] = gobject.timeout_add(delay_ms, _key_repeat_timeout, now)
 
     def _process_key_repeat(self, proto, packet):
-        if not self.keyboard:
-            log.info("ignoring key repeat packet since keyboard is turned off")
-            return
         if len(packet)<6:
             #don't bother trying to make it work with old clients
             if self.keyboard_sync:

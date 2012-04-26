@@ -181,7 +181,6 @@ def set_keycodes(keycodes, preserve_keycodes={}):
     used = []
     trans = {}
     instructions = []
-    missing_keysyms = []
     for keycode, entries in keycodes.items():
         server_keycode = keycode
         if preserve_keycodes:
@@ -215,15 +214,13 @@ def set_keycodes(keycodes, preserve_keycodes={}):
             except:
                 keysym = None
             if keysym is None:
-                missing_keysyms.append(name)
+                log.error("cannot find keysym for %s", name)
             else:
                 keysyms.append(keysym)
         if len(keysyms)>=2 and len(keysyms)<=6:
             keysyms = keysyms[:2]+keysyms
         if len(keysyms)>0:
             instructions.append(("keycode", server_keycode, keysyms))
-    if missing_keysyms:
-        log.error("cannot find the X11 keysym for the following key names: %s", missing_keysyms)
     log.debug("instructions=%s", instructions)
     unset = apply_xmodmap(instructions)
     log.debug("unset=%s", unset)

@@ -9,10 +9,10 @@
 
 import sys
 import os.path
-from wimpiggy.gobject_compat import import_gtk, import_gdk, import_gobject, is_gtk3
-gtk = import_gtk()
-gdk = import_gdk()
-gobject = import_gobject()
+import pygtk
+pygtk.require("2.0")
+import gtk
+import gobject
 import webbrowser
 import time
 import datetime
@@ -80,7 +80,7 @@ def set_checkeditems(submenu, is_match_func):
                 x.set_active(v)
 
 def set_tooltip_text(widget, text):
-    if hasattr(gtk, "pygtk_version") and gtk.pygtk_version<(2,12):
+    if gtk.pygtk_version<(2,12):
         #not available!
         return
     widget.set_tooltip_text(text)
@@ -112,10 +112,7 @@ class ClientExtrasBase(object):
             window_icon = self.get_icon_filename("xpra.png")
         if window_icon and os.path.exists(window_icon):
             try:
-                if is_gtk3():
-                    gtk.Window.set_default_icon_from_file(window_icon)
-                else:
-                    gtk.window_set_default_icon_from_file(window_icon)
+                gtk.window_set_default_icon_from_file(window_icon)
                 log.debug("set default window icon to %s", window_icon)
             except Exception, e:
                 log.error("failed to set window icon %s: %s, continuing", window_icon, e)
@@ -164,7 +161,8 @@ class ClientExtrasBase(object):
         pass
 
     def system_bell(self, window, device, percent, pitch, duration, bell_class, bell_id, bell_name):
-        gdk.beep()
+        import gtk.gdk
+        gtk.gdk.beep()
 
     def get_layout_spec(self):
         """ layout, variant, variants"""
@@ -192,13 +190,12 @@ class ClientExtrasBase(object):
             self.about_dialog.present()
             return
         dialog = gtk.AboutDialog()
-        if not is_gtk3():
-            def on_website_hook(dialog, web, *args):
-                webbrowser.open("http://xpra.org/")
-            def on_email_hook(dialog, mail, *args):
-                webbrowser.open("mailto://"+mail)
-            gtk.about_dialog_set_url_hook(on_website_hook)
-            gtk.about_dialog_set_email_hook(on_email_hook)
+        def on_website_hook(dialog, web, *args):
+            webbrowser.open("http://xpra.org/")
+        def on_email_hook(dialog, mail, *args):
+            webbrowser.open("mailto://"+mail)
+        gtk.about_dialog_set_url_hook(on_website_hook)
+        gtk.about_dialog_set_email_hook(on_email_hook)
         dialog.set_name("Xpra")
         from xpra import __version__
         dialog.set_version(__version__)
@@ -254,10 +251,7 @@ class ClientExtrasBase(object):
             pixbuf = self.get_pixbuf("xpra.png")
         if pixbuf:
             window.set_icon(pixbuf)
-        if is_gtk3():
-            window.set_position(gtk.WindowPosition.CENTER)
-        else:
-            window.set_position(gtk.WIN_POS_CENTER)
+        window.set_position(gtk.WIN_POS_CENTER)
 
         # Contents box
         vbox = gtk.VBox(False, 0)
@@ -277,14 +271,6 @@ class ClientExtrasBase(object):
 
         # now add some rows with info:
         row = 0
-        if is_gtk3():
-            row = add_row(row, gtk.Label("PyGobject version"), gtk.Label(gobject._version))
-            row = add_row(row, gtk.Label("GTK version"), gtk.Label(gtk._version))
-            row = add_row(row, gtk.Label("GDK version"), gtk.Label(gdk._version))
-        else:
-            row = add_row(row, gtk.Label("PyGTK version"), gtk.Label(".".join([str(x) for x in gtk.pygtk_version])))
-            row = add_row(row, gtk.Label("GTK version"), gtk.Label(".".join([str(x) for x in gtk.gtk_version])))
-
         self.server_version_label = gtk.Label()
         row = add_row(row, gtk.Label("Server Version"), self.server_version_label)
         if self.client.server_platform:
@@ -315,7 +301,7 @@ class ClientExtrasBase(object):
                 return False
             self.client.send_ping()
             def settimedeltastr(label, from_time):
-                delta = datetime.timedelta(seconds=(int(time.time())-int(from_time)))
+                delta = datetime.timedelta(seconds=(long(time.time())-long(from_time)))
                 label.set_text(str(delta))
             v = self.client._remote_version or "unknown"
             if self.client.mmap_enabled:
@@ -333,10 +319,10 @@ class ClientExtrasBase(object):
             if self.client.server_load:
                 self.server_load_label.set_text("  ".join([str(x/1000.0) for x in self.client.server_load]))
             if len(self.client.server_latency)>0:
-                avg = int(10*sum(self.client.server_latency)/len(self.client.server_latency))/10
+                avg = sum(self.client.server_latency)/len(self.client.server_latency)
                 self.server_latency_label.set_text("%sms  (%sms)" % (self.client.server_latency[-1], avg))
             if len(self.client.client_latency)>0:
-                avg = int(10*sum(self.client.client_latency)/len(self.client.client_latency))/10
+                avg = sum(self.client.client_latency)/len(self.client.client_latency)
                 self.client_latency_label.set_text("%sms  (%sms)" % (self.client.client_latency[-1], avg))
             if self.client.server_start_time>0:
                 settimedeltastr(self.session_started_label, self.client.server_start_time)
@@ -359,17 +345,17 @@ class ClientExtrasBase(object):
                     if v<0:
                         return  "n/a"
                     if v>1000*1000*1000:
-                        return "%sG" % (int(v/1000/1000/100)/10.0)
+                        return "%sG" % (long(v/1000/1000/100)/10.0)
                     elif v>1000*1000:
-                        return "%sM" % (int(v/1000/100)/10.0)
+                        return "%sM" % (long(v/1000/100)/10.0)
                     elif v>1000:
-                        return "%sK" % (int(v/100)/10.0)
+                        return "%sK" % (long(v/100)/10.0)
                     else:
                         return str(v)
                 def fpsstr(v):
                     if v<0:
                         return  "n/a"
-                    return "%s" % (int(v*100)/100.0)
+                    return "%s" % (long(v*100)/100.0)
                 def average(seconds):
                     total = 0
                     total_n = 0
@@ -393,7 +379,7 @@ class ClientExtrasBase(object):
                         return  None
                     avgs = avgs/total_n
                     elapsed = now-startt
-                    return int(total/elapsed), total_n/elapsed, mins, avgs, maxs
+                    return long(total/elapsed), total_n/elapsed, mins, avgs, maxs
                 p20 = average(20)
                 if p20:
                     avg20,fps20,mins,avgs,maxs = p20
@@ -414,8 +400,7 @@ class ClientExtrasBase(object):
 
         window.set_border_width(15)
         window.add(vbox)
-        if not is_gtk3():
-            window.set_geometry_hints(vbox)
+        window.set_geometry_hints(vbox)
         def window_deleted(*args):
             self.session_info_window = None
         window.connect('delete_event', window_deleted)
@@ -433,11 +418,9 @@ class ClientExtrasBase(object):
             log.error("closing session info", exc_info=True)
 
     def add_close_accel(self, window, callback):
-        if is_gtk3():
-            return      #TODO: implement accel for gtk3
         # key accelerators
         accel_group = gtk.AccelGroup()
-        accel_group.connect_group(ord('w'), gdk.CONTROL_MASK, gtk.ACCEL_LOCKED, callback)
+        accel_group.connect_group(ord('w'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_LOCKED, callback)
         window.add_accel_group(accel_group)
         accel_group = gtk.AccelGroup()
         escape_key, modifier = gtk.accelerator_parse('Escape')
@@ -470,9 +453,9 @@ class ClientExtrasBase(object):
 
     def get_icon_filename(self, icon_name):
         filename = os.path.join(self.get_data_dir(), 'icons', icon_name)
+        log.debug("get_icon_filename(%s)=%s, exists=%s" % (icon_name, filename, os.path.exists(filename)))
         if os.path.exists(filename):
             return  filename
-        log.error("get_icon_filename(%s) %s does not exists!" % (icon_name, filename))
         return  None
 
     def get_license_text(self):
@@ -481,10 +464,7 @@ class ClientExtrasBase(object):
         filename = os.path.join(self.get_data_dir(), 'COPYING')
         if os.path.exists(filename):
             try:
-                if sys.version < '3':
-                    license_file = open(filename, mode='rb')
-                else:
-                    license_file = open(filename, mode='r', encoding='ascii')
+                license_file = open(filename, mode='rb')
                 return license_file.read()
             finally:
                 license_file.close()
@@ -495,15 +475,9 @@ class ClientExtrasBase(object):
     def get_pixbuf(self, icon_name):
         try:
             icon_filename = self.get_icon_filename(icon_name)
-            if icon_filename:
-                if is_gtk3():
-                    from gi.repository.GdkPixbuf import Pixbuf    #@UnresolvedImport
-                    return Pixbuf.new_from_file(icon_filename)
-                else:
-                    return  gdk.pixbuf_new_from_file(icon_filename)
+            return  gtk.gdk.pixbuf_new_from_file(icon_filename)
         except:
-            log.error("get_image(%s)", icon_name, exc_info=True)
-        return  None
+            return  None
 
     def get_image(self, icon_name, size=None):
         try:
@@ -511,17 +485,9 @@ class ClientExtrasBase(object):
             if not pixbuf:
                 return  None
             if size:
-                if is_gtk3():
-                    from gi.repository.GdkPixbuf import InterpType  #@UnresolvedImport
-                    interp = InterpType.BILINEAR
-                else:
-                    interp = gdk.INTERP_BILINEAR
-                pixbuf = pixbuf.scale_simple(size, size, interp)
-            if is_gtk3():
-                return  gtk.Image.new_from_pixbuf(pixbuf)
+                pixbuf = pixbuf.scale_simple(size, size, gtk.gdk.INTERP_BILINEAR)
             return  gtk.image_new_from_pixbuf(pixbuf)
         except:
-            log.error("get_image(%s, %s)", icon_name, size, exc_info=True)
             return  None
 
 
@@ -537,8 +503,8 @@ class ClientExtrasBase(object):
             #override gtk defaults: we *want* icons:
             settings = menu_item.get_settings()
             settings.set_property('gtk-menu-images', True)
-            if hasattr(menu_item, "set_always_show_image"):
-                menu_item.set_always_show_image(True)
+            if hasattr(settings, "set_always_show_image"):
+                settings.set_always_show_image(True)
         if tooltip:
             set_tooltip_text(menu_item, tooltip)
         if cb:
@@ -571,10 +537,7 @@ class ClientExtrasBase(object):
 
     def show_menu(self, button, time):
         self.close_menu()
-        if is_gtk3():
-            self.menu.popup(None, None, None, None, button, time)
-        else:
-            self.menu.popup(None, None, None, button, time, None)
+        self.menu.popup(None, None, None, button, time, None)
         self.menu_shown = True
 
     def make_aboutmenuitem(self):
@@ -700,7 +663,7 @@ class ClientExtrasBase(object):
                 self.layout_submenu.append(kbitem("%s - %s" % (layout, v), layout, v))
         else:
             #show all options to choose from:
-            sorted_keys = list(X11_LAYOUTS.keys())
+            sorted_keys = X11_LAYOUTS.keys()
             sorted_keys.sort(key=keysort)
             for key in sorted_keys:
                 country,language = key

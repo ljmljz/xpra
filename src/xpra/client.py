@@ -5,151 +5,12 @@
 # Parti is released under the terms of the GNU GPL v2, or, at your option, any
 # later version. See the file COPYING for details.
 
-#pygtk3 vs pygtk2 (sigh)
-from wimpiggy.gobject_compat import import_gobject, import_gtk, import_gdk, is_gtk3
-gobject = import_gobject()
-gtk = import_gtk()
-gdk = import_gdk()
-if is_gtk3():
-    def get_modifiers_mask():
-        return gdk.get_default_root_window().get_pointer()[-1]
-    def get_root_size():
-        return gdk.get_default_root_window().get_geometry()[2:]
-    def init_window(win, wintype):
-        #TODO: no idea how to do this with gtk3
-        #maybe not even possible..
-        gtk.Window.__init__(win)
-    def get_window_geometry(gtkwindow):
-        x, y = gtkwindow.get_position()
-        w, h = gtkwindow.get_size()
-        return (x, y, w, h)
-    def set_geometry_hints(window, hints):
-        """ we convert the hints as a dict into a gdk.Geometry + gdk.WindowHints """
-        wh = gdk.WindowHints
-        name_to_hint = {"maximum-size"  : wh.MAX_SIZE,
-                        "max_width"     : wh.MAX_SIZE,
-                        "max_height"    : wh.MAX_SIZE,
-                        "minimum-size"  : wh.MIN_SIZE,
-                        "min_width"     : wh.MIN_SIZE,
-                        "min_height"    : wh.MIN_SIZE,
-                        "base-size"     : wh.BASE_SIZE,
-                        "base_width"    : wh.BASE_SIZE,
-                        "base_height"   : wh.BASE_SIZE,
-                        "increment"     : wh.RESIZE_INC,
-                        "width_inc"     : wh.RESIZE_INC,
-                        "height_inc"    : wh.RESIZE_INC,
-                        "min_aspect_ratio"  : wh.ASPECT,
-                        "max_aspect_ratio"  : wh.ASPECT,
-                        }
-        #these fields can be copied directly to the gdk.Geometry as ints:
-        INT_FIELDS= ["min_width",    "min_height",
-                        "max_width",    "max_height",
-                        "base_width",   "base_height",
-                        "width_inc",    "height_inc"]
-        ASPECT_FIELDS = {
-                        "min_aspect_ratio"  : "min_aspect",
-                        "max_aspect_ratio"  : "max_aspect",
-                         }
-        geom = gdk.Geometry()
-        mask = 0
-        for k,v in hints:
-            if k in INT_FIELDS:
-                setattr(geom, k, int(v))
-                mask |= int(name_to_hint.get(k, 0))
-            elif k in ASPECT_FIELDS:
-                field = ASPECT_FIELDS.get(k)
-                setattr(geom, field, float(v))
-                mask |= int(name_to_hint.get(k, 0))
-        hints = gdk.WindowHints(mask)
-        window.set_geometry_hints(None, geom, hints)
-
-    def set_windows_cursor(gtkwindows, new_cursor):
-        pass
-        #window.override_cursor(cursor, None)
-    def queue_draw(window, x, y, width, height):
-        window.queue_draw_area(x, y, width, height)
-    WINDOW_POPUP = gtk.WindowType.POPUP
-    WINDOW_TOPLEVEL = gtk.WindowType.TOPLEVEL
-    WINDOW_EVENT_MASK = 0
-    OR_TYPE_HINTS = []
-    NAME_TO_HINT = { }
-    SCROLL_MAP = {}
-else:
-    def get_modifiers_mask():
-        return  gdk.get_default_root_window().get_pointer()[-1]
-    def get_root_size():
-        return gdk.get_default_root_window().get_size()
-    def init_window(gtkwindow, wintype):
-        gtk.Window.__init__(gtkwindow, wintype)
-    def get_window_geometry(gtkwindow):
-        gdkwindow = gtkwindow.get_window()
-        x, y = gdkwindow.get_origin()
-        _, _, w, h, _ = gdkwindow.get_geometry()
-        return (x, y, w, h)
-    def set_geometry_hints(gtkwindow, hints):
-        gtkwindow.set_geometry_hints(None, **hints)
-    def set_windows_cursor(gtkwindows, new_cursor):
-        cursor = None
-        if len(new_cursor)>0:
-            (_, _, w, h, xhot, yhot, serial, pixels) = new_cursor
-            log.debug("new cursor at %s,%s with serial=%s, dimensions: %sx%s, len(pixels)=%s" % (xhot,yhot, serial, w,h, len(pixels)))
-            pixbuf = gdk.pixbuf_new_from_data(pixels, gdk.COLORSPACE_RGB, True, 8, w, h, w * 4)
-            x = max(0, min(xhot, w-1))
-            y = max(0, min(yhot, h-1))
-            size = gdk.display_get_default().get_default_cursor_size()
-            if size>0 and (size<w or size<h):
-                ratio = float(max(w,h))/size
-                pixbuf = pixbuf.scale_simple(int(w/ratio), int(h/ratio), gdk.INTERP_BILINEAR)
-                x = int(x/ratio)
-                y = int(y/ratio)
-            cursor = gdk.Cursor(gdk.display_get_default(), pixbuf, x, y)
-        for gtkwindow in gtkwindows:
-            gtkwindow.get_window().set_cursor(cursor)
-
-    def queue_draw(gtkwindow, x, y, width, height):
-        gtkwindow.get_window().invalidate_rect(gdk.Rectangle(x, y, width, height), False)
-    WINDOW_POPUP = gtk.WINDOW_POPUP
-    WINDOW_TOPLEVEL = gtk.WINDOW_TOPLEVEL
-    WINDOW_EVENT_MASK = gdk.STRUCTURE_MASK | gdk.KEY_PRESS_MASK | gdk.KEY_RELEASE_MASK | gdk.POINTER_MOTION_MASK | gdk.BUTTON_PRESS_MASK | gdk.BUTTON_RELEASE_MASK
-    OR_TYPE_HINTS = [gdk.WINDOW_TYPE_HINT_DIALOG,
-                gdk.WINDOW_TYPE_HINT_MENU, gdk.WINDOW_TYPE_HINT_TOOLBAR,
-                #gdk.WINDOW_TYPE_HINT_SPLASHSCREEN, gdk.WINDOW_TYPE_HINT_UTILITY,
-                #gdk.WINDOW_TYPE_HINT_DOCK, gdk.WINDOW_TYPE_HINT_DESKTOP,
-                gdk.WINDOW_TYPE_HINT_DROPDOWN_MENU, gdk.WINDOW_TYPE_HINT_POPUP_MENU,
-                gdk.WINDOW_TYPE_HINT_TOOLTIP,
-                #gdk.WINDOW_TYPE_HINT_NOTIFICATION,
-                gdk.WINDOW_TYPE_HINT_COMBO,gdk.WINDOW_TYPE_HINT_DND]
-    NAME_TO_HINT = {
-                "_NET_WM_WINDOW_TYPE_NORMAL"    : gdk.WINDOW_TYPE_HINT_NORMAL,
-                "_NET_WM_WINDOW_TYPE_DIALOG"    : gdk.WINDOW_TYPE_HINT_DIALOG,
-                "_NET_WM_WINDOW_TYPE_MENU"      : gdk.WINDOW_TYPE_HINT_MENU,
-                "_NET_WM_WINDOW_TYPE_TOOLBAR"   : gdk.WINDOW_TYPE_HINT_TOOLBAR,
-                "_NET_WM_WINDOW_TYPE_SPLASH"    : gdk.WINDOW_TYPE_HINT_SPLASHSCREEN,
-                "_NET_WM_WINDOW_TYPE_UTILITY"   : gdk.WINDOW_TYPE_HINT_UTILITY,
-                "_NET_WM_WINDOW_TYPE_DOCK"      : gdk.WINDOW_TYPE_HINT_DOCK,
-                "_NET_WM_WINDOW_TYPE_DESKTOP"   : gdk.WINDOW_TYPE_HINT_DESKTOP,
-                "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU" : gdk.WINDOW_TYPE_HINT_DROPDOWN_MENU,
-                "_NET_WM_WINDOW_TYPE_POPUP_MENU": gdk.WINDOW_TYPE_HINT_POPUP_MENU,
-                "_NET_WM_WINDOW_TYPE_TOOLTIP"   : gdk.WINDOW_TYPE_HINT_TOOLTIP,
-                "_NET_WM_WINDOW_TYPE_NOTIFICATION" : gdk.WINDOW_TYPE_HINT_NOTIFICATION,
-                "_NET_WM_WINDOW_TYPE_COMBO"     : gdk.WINDOW_TYPE_HINT_COMBO,
-                "_NET_WM_WINDOW_TYPE_DND"       : gdk.WINDOW_TYPE_HINT_DND
-                }
-        # Map scroll directions back to mouse buttons.  Mapping is taken from
-        # gdk/x11/gdkevents-x11.c.
-    SCROLL_MAP = {gdk.SCROLL_UP: 4,
-                  gdk.SCROLL_DOWN: 5,
-                  gdk.SCROLL_LEFT: 6,
-                  gdk.SCROLL_RIGHT: 7,
-                  }
-
-
+import gtk
+import gobject
 import cairo
 import re
 import os
 import time
-import sys
-import ctypes
 
 from wimpiggy.util import (n_arg_signal,
                            gtk_main_quit_really,
@@ -161,18 +22,10 @@ log = Logger()
 from xpra.deque import maxdeque
 from xpra.client_base import XpraClientBase
 from xpra.keys import mask_to_names, DEFAULT_MODIFIER_MEANINGS, DEFAULT_MODIFIER_NUISANCE, DEFAULT_MODIFIER_IGNORE_KEYNAMES
-from xpra.window_backing import new_backing
 from xpra.platform.gui import ClientExtras
 from xpra.scripts.main import ENCODINGS
 from xpra.version_util import is_compatible_with
 
-if sys.version < '3':
-    import codecs
-    def u(x):
-        return codecs.unicode_escape_decode(x)[0]
-else:
-    def u(x):
-        return x
 def nn(x):
     if x is None:
         return  ""
@@ -181,17 +34,17 @@ def nn(x):
 class ClientWindow(gtk.Window):
     def __init__(self, client, wid, x, y, w, h, metadata, override_redirect):
         if override_redirect:
-            init_window(self, WINDOW_POPUP)
+            gtk.Window.__init__(self, gtk.WINDOW_POPUP)
         else:
-            init_window(self, WINDOW_TOPLEVEL)
+            gtk.Window.__init__(self, gtk.WINDOW_TOPLEVEL)
         self._client = client
         self._id = wid
         self._pos = (-1, -1)
         self._size = (1, 1)
         self._backing = None
-        self.new_backing(w, h)
         self._metadata = {}
         self._override_redirect = override_redirect
+        self._new_backing(w, h)
         self._refresh_timer = None
         self._refresh_requested = False
         # used for only sending focus events *after* the window is mapped:
@@ -201,18 +54,27 @@ class ClientWindow(gtk.Window):
         self.update_metadata(metadata)
 
         self.set_app_paintable(True)
-        self.add_events(WINDOW_EVENT_MASK)
+        self.add_events(gtk.gdk.STRUCTURE_MASK
+                        | gtk.gdk.KEY_PRESS_MASK | gtk.gdk.KEY_RELEASE_MASK
+                        | gtk.gdk.POINTER_MOTION_MASK
+                        | gtk.gdk.BUTTON_PRESS_MASK
+                        | gtk.gdk.BUTTON_RELEASE_MASK)
+
         self.move(x, y)
         self.set_default_size(w, h)
         if override_redirect:
             transient_for = self.get_transient_for()
             type_hint = self.get_type_hint()
-            if transient_for is not None and transient_for.window is not None and type_hint in OR_TYPE_HINTS:
+            if transient_for is not None and transient_for.window is not None and type_hint in [gtk.gdk.WINDOW_TYPE_HINT_DIALOG,
+                            gtk.gdk.WINDOW_TYPE_HINT_MENU, gtk.gdk.WINDOW_TYPE_HINT_TOOLBAR,
+                            #gtk.gdk.WINDOW_TYPE_HINT_SPLASHSCREEN, gtk.gdk.WINDOW_TYPE_HINT_UTILITY,
+                            #gtk.gdk.WINDOW_TYPE_HINT_DOCK, gtk.gdk.WINDOW_TYPE_HINT_DESKTOP,
+                            gtk.gdk.WINDOW_TYPE_HINT_DROPDOWN_MENU, gtk.gdk.WINDOW_TYPE_HINT_POPUP_MENU,
+                            gtk.gdk.WINDOW_TYPE_HINT_TOOLTIP,
+                            #gtk.gdk.WINDOW_TYPE_HINT_NOTIFICATION,
+                            gtk.gdk.WINDOW_TYPE_HINT_COMBO,gtk.gdk.WINDOW_TYPE_HINT_DND]:
                 transient_for._override_redirect_windows.append(self)
         self.connect("notify::has-toplevel-focus", self._focus_change)
-
-    def new_backing(self, w, h):
-        self._backing = new_backing(self._id, w, h, self._backing, self._client.supports_mmap, self._client.mmap)
 
     def update_metadata(self, metadata):
         self._metadata.update(metadata)
@@ -220,15 +82,15 @@ class ClientWindow(gtk.Window):
         title = self._client.title
         if title.find("@")>=0:
             #perform metadata variable substitutions:
-            default_values = {"title" : u("<untitled window>"),
-                              "client-machine" : u("<unknown machine>")}
+            default_values = {"title" : u"<untitled window>",
+                              "client-machine" : u"<unknown machine>"}
             def metadata_replace(match):
                 atvar = match.group(0)          #ie: '@title@'
                 var = atvar[1:len(atvar)-1]     #ie: 'title'
-                default_value = default_values.get(var, u("<unknown %s>") % var)
-                return self._metadata.get(var, default_value)
+                default_value = default_values.get(var, u"<unknown %s>" % var)
+                return self._metadata.get(var, default_value).decode("utf-8")
             title = re.sub("@[\w\-]*@", metadata_replace, title)
-        self.set_title(u(title))
+        self.set_title(u"%s" % title)
 
         if "size-constraints" in self._metadata:
             size_metadata = self._metadata["size-constraints"]
@@ -247,15 +109,9 @@ class ClientWindow(gtk.Window):
                 ]:
                 if a in self._metadata:
                     hints[h] = size_metadata[a][0] * 1.0 / size_metadata[a][1]
-            set_geometry_hints(self, hints)
+            self.set_geometry_hints(None, **hints)
 
-        if hasattr(self, "get_realized"):
-            #pygtk 2.22 and above have this method:
-            realized = self.get_realized()
-        else:
-            #older versions:
-            realized = self.flags() & gtk.REALIZED
-        if not realized:
+        if not (self.flags() & gtk.REALIZED):
             self.set_wmclass(*self._metadata.get("class-instance",
                                                  ("xpra", "Xpra")))
 
@@ -268,12 +124,12 @@ class ClientWindow(gtk.Window):
                 # than doing a bunch of alpha un-premultiplying and byte-swapping
                 # by hand in Python (better still would be to write some Pyrex,
                 # but I don't have time right now):
-                loader = gdk.PixbufLoader()
+                loader = gtk.gdk.PixbufLoader()
                 cairo_surf.write_to_png(loader)
                 loader.close()
                 pixbuf = loader.get_pixbuf()
             else:
-                loader = gdk.PixbufLoader(coding)
+                loader = gtk.gdk.PixbufLoader(coding)
                 loader.write(data, len(data))
                 loader.close()
                 pixbuf = loader.get_pixbuf()
@@ -287,14 +143,52 @@ class ClientWindow(gtk.Window):
                 self.set_transient_for(window)
 
         if "window-type" in self._metadata:
+            name_to_hint = {
+                            "_NET_WM_WINDOW_TYPE_NORMAL"    : gtk.gdk.WINDOW_TYPE_HINT_NORMAL,
+                            "_NET_WM_WINDOW_TYPE_DIALOG"    : gtk.gdk.WINDOW_TYPE_HINT_DIALOG,
+                            "_NET_WM_WINDOW_TYPE_MENU"      : gtk.gdk.WINDOW_TYPE_HINT_MENU,
+                            "_NET_WM_WINDOW_TYPE_TOOLBAR"   : gtk.gdk.WINDOW_TYPE_HINT_TOOLBAR,
+                            "_NET_WM_WINDOW_TYPE_SPLASH"    : gtk.gdk.WINDOW_TYPE_HINT_SPLASHSCREEN,
+                            "_NET_WM_WINDOW_TYPE_UTILITY"   : gtk.gdk.WINDOW_TYPE_HINT_UTILITY,
+                            "_NET_WM_WINDOW_TYPE_DOCK"      : gtk.gdk.WINDOW_TYPE_HINT_DOCK,
+                            "_NET_WM_WINDOW_TYPE_DESKTOP"   : gtk.gdk.WINDOW_TYPE_HINT_DESKTOP,
+                            "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU" : gtk.gdk.WINDOW_TYPE_HINT_DROPDOWN_MENU,
+                            "_NET_WM_WINDOW_TYPE_POPUP_MENU": gtk.gdk.WINDOW_TYPE_HINT_POPUP_MENU,
+                            "_NET_WM_WINDOW_TYPE_TOOLTIP"   : gtk.gdk.WINDOW_TYPE_HINT_TOOLTIP,
+                            "_NET_WM_WINDOW_TYPE_NOTIFICATION" : gtk.gdk.WINDOW_TYPE_HINT_NOTIFICATION,
+                            "_NET_WM_WINDOW_TYPE_COMBO"     : gtk.gdk.WINDOW_TYPE_HINT_COMBO,
+                            "_NET_WM_WINDOW_TYPE_DND"       : gtk.gdk.WINDOW_TYPE_HINT_DND
+                            }
             window_types = self._metadata.get("window-type")
             log.debug("window types=%s", window_types)
             for window_type in window_types:
-                hint = NAME_TO_HINT.get(window_type)
+                hint = name_to_hint.get(window_type)
                 if hint:
                     log.debug("setting window type to %s - %s", window_type, hint)
                     self.set_type_hint(hint)
                     break
+
+    def _new_backing(self, w, h):
+        old_backing = self._backing
+        self._backing = gtk.gdk.Pixmap(gtk.gdk.get_default_root_window(), w, h)
+        cr = self._backing.cairo_create()
+        if old_backing is not None:
+            # Really we should respect bit-gravity here but... meh.
+            cr.set_operator(cairo.OPERATOR_SOURCE)
+            cr.set_source_pixmap(old_backing, 0, 0)
+            cr.paint()
+            old_w, old_h = old_backing.get_size()
+            cr.move_to(old_w, 0)
+            cr.line_to(w, 0)
+            cr.line_to(w, h)
+            cr.line_to(0, h)
+            cr.line_to(0, old_h)
+            cr.line_to(old_w, old_h)
+            cr.close_path()
+        else:
+            cr.rectangle(0, 0, w, h)
+        cr.set_source_rgb(1, 1, 1)
+        cr.fill()
 
     def refresh_window(self):
         log.debug("Automatic refresh for id %s", self._id)
@@ -306,9 +200,47 @@ class ClientWindow(gtk.Window):
         #the "ClientWindow"
         self._client.send_refresh_all()
 
-    def draw_region(self, x, y, width, height, coding, img_data, rowstride):
-        self._backing.draw_region(x, y, width, height, coding, img_data, rowstride)
-        queue_draw(self, x, y, width, height)
+    def draw(self, x, y, width, height, coding, img_data, rowstride):
+        gc = self._backing.new_gc()
+        if coding == "mmap":
+            """ see _mmap_send() in server.py for details """
+            assert self._client.supports_mmap
+            import ctypes
+            data_start = ctypes.c_uint.from_buffer(self._client.mmap, 0)
+            if len(img_data)==1:
+                #construct an array directly from the mmap zone:
+                offset, length = img_data[0]
+                arraytype = ctypes.c_char * length
+                data = arraytype.from_buffer(self._client.mmap, offset)
+                self._backing.draw_rgb_image(gc, x, y, width, height, gtk.gdk.RGB_DITHER_NONE, data, rowstride)
+                data_start.value = offset+length
+                self._backing.draw_rgb_image(gc, x, y, width, height, gtk.gdk.RGB_DITHER_NONE, data, rowstride)
+            else:
+                #re-construct the buffer from discontiguous chunks:
+                log("drawing from discontiguous area: %s", img_data)
+                data = ""
+                for offset, length in img_data:
+                    self._client.mmap.seek(offset)
+                    data += self._client.mmap.read(length)
+                    data_start.value = offset+length
+                self._backing.draw_rgb_image(gc, x, y, width, height, gtk.gdk.RGB_DITHER_NONE, data, rowstride)
+        elif coding == "rgb24":
+            if rowstride>0:
+                assert len(img_data) == rowstride * height
+            else:
+                assert len(img_data) == width * 3 * height
+            self._backing.draw_rgb_image(gc, x, y, width, height, gtk.gdk.RGB_DITHER_NONE, img_data, rowstride)
+        else:
+            loader = gtk.gdk.PixbufLoader(coding)
+            loader.write(img_data, len(img_data))
+            loader.close()
+            pixbuf = loader.get_pixbuf()
+            if not pixbuf:
+                log.error("failed %s pixbuf=%s data len=%s" % (coding, pixbuf, len(img_data)))
+            else:
+                self._backing.draw_pixbuf(gc, pixbuf, 0, 0, x, y, width, height)
+        self.window.invalidate_rect(gtk.gdk.Rectangle(x, y, width, height), False)
+
         if self._refresh_requested:
             self._refresh_requested = False
         else:
@@ -318,28 +250,27 @@ class ClientWindow(gtk.Window):
             if self._client.auto_refresh_delay and coding == "jpeg":
                 self._refresh_timer = gobject.timeout_add(int(1000 * self._client.auto_refresh_delay), self.refresh_window)
 
-    """ gtk3 """
-    def do_draw(self, context):
-        log.debug("do_draw(%s)", context)
-        if self.get_mapped():
-            self._backing.cairo_draw(context, 0, 0)
-
-    """ gtk2 """
     def do_expose_event(self, event):
-        log.debug("do_expose_event(%s) area=%s", event, event.area)
-        if not (self.flags() & gtk.MAPPED):
+        if not self.flags() & gtk.MAPPED:
             return
-        x,y,_,_ = event.area
-        context = self.window.cairo_create()
-        context.rectangle(event.area)
-        context.clip()
-        self._backing.cairo_draw(context, x, y)
+        cr = self.window.cairo_create()
+        cr.rectangle(event.area)
+        cr.clip()
+        cr.set_source_pixmap(self._backing, 0, 0)
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.paint()
+        return False
+
+    def _geometry(self):
+        (x, y) = self.window.get_origin()
+        (_, _, w, h, _) = self.window.get_geometry()
+        return (x, y, w, h)
 
     def do_map_event(self, event):
         log("Got map event")
         gtk.Window.do_map_event(self, event)
         if not self._override_redirect:
-            x, y, w, h = get_window_geometry(self)
+            x, y, w, h = self._geometry()
             self._client.send(["map-window", self._id, x, y, w, h])
             self._pos = (x, y)
             self._size = (w, h)
@@ -350,7 +281,7 @@ class ClientWindow(gtk.Window):
         log("Got configure event")
         gtk.Window.do_configure_event(self, event)
         if not self._override_redirect:
-            x, y, w, h = get_window_geometry(self)
+            x, y, w, h = self._geometry()
             if (x, y) != self._pos:
                 ox, oy = self._pos
                 dx, dy = x-ox, y-oy
@@ -362,17 +293,16 @@ class ClientWindow(gtk.Window):
             if (w, h) != self._size:
                 self._size = (w, h)
                 self._client.send(["resize-window", self._id, w, h])
-                self.new_backing(w, h)
+                self._new_backing(w, h)
 
     def move_resize(self, x, y, w, h):
         assert self._override_redirect
         self.window.move_resize(x, y, w, h)
-        self.new_backing(w, h)
+        self._new_backing(w, h)
 
     def destroy(self):
         self._unfocus()
         gtk.Window.destroy(self)
-        self._backing.close()
 
     def _unfocus(self):
         if self._client._focused==self._id:
@@ -432,8 +362,15 @@ class ClientWindow(gtk.Window):
     def do_scroll_event(self, event):
         if self._client.readonly:
             return
-        self._button_action(SCROLL_MAP[event.direction], event, True)
-        self._button_action(SCROLL_MAP[event.direction], event, False)
+        # Map scroll directions back to mouse buttons.  Mapping is taken from
+        # gdk/x11/gdkevents-x11.c.
+        scroll_map = {gtk.gdk.SCROLL_UP: 4,
+                      gtk.gdk.SCROLL_DOWN: 5,
+                      gtk.gdk.SCROLL_LEFT: 6,
+                      gtk.gdk.SCROLL_RIGHT: 7,
+                      }
+        self._button_action(scroll_map[event.direction], event, True)
+        self._button_action(scroll_map[event.direction], event, False)
 
     def _focus_change(self, *args):
         log("_focus_change(%s)", args)
@@ -490,17 +427,18 @@ class XpraClient(XpraClientBase):
 
         self._client_extras = ClientExtras(self, opts)
         self.clipboard_enabled = not self.readonly and opts.clipboard and self._client_extras.supports_clipboard()
-        self.supports_mmap = opts.mmap and ("rgb24" in ENCODINGS) and self._client_extras.supports_mmap()
+        self.supports_mmap = opts.mmap and self._client_extras.supports_mmap()
         if self.supports_mmap:
             try:
                 import mmap
                 import tempfile
                 import uuid
+                import ctypes
                 from stat import S_IRUSR,S_IWUSR,S_IRGRP,S_IWGRP
                 mmap_dir = os.getenv("TMPDIR", "/tmp")
                 if not os.path.exists(mmap_dir):
                     raise Exception("TMPDIR %s does not exist!" % mmap_dir)
-                #create the mmap file, the mkstemp that is called via NamedTemporaryFile ensures
+                #create the mmap file, the mkstemp that is called via NamedTemporaryFile ensures 
                 #that the file is readable and writable only by the creating user ID
                 temp = tempfile.NamedTemporaryFile(prefix="xpra.", suffix=".mmap", dir=mmap_dir)
                 #keep a reference to it so it does not disappear!
@@ -544,16 +482,12 @@ class XpraClient(XpraClientBase):
         self.keys_pressed = {}
         self._remote_version = None
         self._keymap_changing = False
-        try:
-            self._keymap = gdk.keymap_get_default()
-        except:
-            self._keymap = None
+        self._keymap = gtk.gdk.keymap_get_default()
         self._do_keys_changed()
         self.key_shortcuts = self.parse_shortcuts(opts.key_shortcuts)
         self.send_hello()
 
-        if self._keymap:
-            self._keymap.connect("keys-changed", self._keys_changed)
+        self._keymap.connect("keys-changed", self._keys_changed)
         self._xsettings_watcher = None
         self._root_props_watcher = None
 
@@ -698,7 +632,7 @@ class XpraClient(XpraClientBase):
             return
         log.debug("handle_key_action(%s,%s,%s)" % (event, window, depressed))
         modifiers = self.mask_to_names(event.state)
-        name = gdk.keyval_name(event.keyval)
+        name = gtk.gdk.keyval_name(event.keyval)
         keyval = nn(event.keyval)
         keycode = event.hardware_keycode
         group = event.group
@@ -785,7 +719,7 @@ class XpraClient(XpraClientBase):
 
     def _keys_changed(self, *args):
         log.debug("keys_changed")
-        self._keymap = gdk.keymap_get_default()
+        self._keymap = gtk.gdk.keymap_get_default()
         if not self._keymap_changing:
             self._keymap_changing = True
             gobject.timeout_add(500, self._do_keys_changed, True)
@@ -793,10 +727,7 @@ class XpraClient(XpraClientBase):
     def _do_keys_changed(self, sendkeymap=False):
         self._keymap_changing = False
         self.query_xkbmap()
-        try:
-            self._modifier_map = self._client_extras.grok_modifier_map(gdk.display_get_default(), self.xkbmap_mod_meanings)
-        except:
-            self._modifier_map = {}
+        self._modifier_map = self._client_extras.grok_modifier_map(gtk.gdk.display_get_default(), self.xkbmap_mod_meanings)
         log.debug("do_keys_changed() modifier_map=%s" % self._modifier_map)
         if sendkeymap:
             if self.xkbmap_layout:
@@ -831,7 +762,8 @@ class XpraClient(XpraClientBase):
             self._focused = None
 
     def get_current_modifiers(self):
-        return self.mask_to_names(get_modifiers_mask())
+        (_, _, current_mask) = gtk.gdk.get_default_root_window().get_pointer()
+        return self.mask_to_names(current_mask)
 
     def mask_to_names(self, mask):
         mn = mask_to_names(mask, self._modifier_map)
@@ -853,7 +785,7 @@ class XpraClient(XpraClientBase):
         capabilities["clipboard"] = self.clipboard_enabled
         capabilities["notifications"] = self._client_extras.can_notify()
         capabilities["modifiers"] = self.get_current_modifiers()
-        root_w, root_h = get_root_size()
+        root_w, root_h = gtk.gdk.get_default_root_window().get_size()
         capabilities["desktop_size"] = [root_w, root_h]
         key_repeat = self._client_extras.get_keyboard_repeat()
         if key_repeat:
@@ -866,15 +798,21 @@ class XpraClient(XpraClientBase):
         #these should be turned into options:
         capabilities["cursors"] = True
         capabilities["bell"] = True
+        #this is to keep compatibility with v0.0.7.36 only
+        #and will be removed shortly
+        capabilities["keyboard_as_properties"] = True
+        capabilities["damage_sequence"] = True
+        capabilities["rowstride"] = True
+        capabilities["ping"] = True
         capabilities["png_window_icons"] = "png" in ENCODINGS
         return capabilities
 
     def send_ping(self):
-        self.send(["ping", int(1000*time.time())])
+        self.send(["ping", long(1000*time.time())])
 
     def _process_ping_echo(self, packet):
         (echoedtime, l1, l2, l3, cl) = packet[1:6]
-        diff = int(1000*time.time()-echoedtime)
+        diff = long(1000*time.time()-echoedtime)
         self.server_latency.append(diff)
         self.server_load = (l1, l2, l3)
         if cl>=0:
@@ -885,7 +823,7 @@ class XpraClient(XpraClientBase):
         echotime = packet[1]
         try:
             (fl1, fl2, fl3) = os.getloadavg()
-            l1,l2,l3 = int(fl1*1000), int(fl2*1000), int(fl3*1000)
+            l1,l2,l3 = long(fl1*1000), long(fl2*1000), long(fl3*1000)
         except:
             l1,l2,l3 = 0,0,0
         sl = -1
@@ -922,7 +860,7 @@ class XpraClient(XpraClientBase):
             return
         #figure out the maximum actual desktop size and use to
         #calculate the maximum size of a packet (a full screen update packet)
-        root_w, root_h = get_root_size()
+        root_w, root_h = gtk.gdk.get_default_root_window().get_size()
         self.server_actual_desktop_size = capabilities.get("actual_desktop_size")
         maxw, maxh = root_w, root_h
         try:
@@ -947,8 +885,8 @@ class XpraClient(XpraClientBase):
                      % (avail_w, avail_h, root_w, root_h))
         self.server_randr = capabilities.get("resize_screen", False)
         log.debug("server has randr: %s", self.server_randr)
-        if self.server_randr and not is_gtk3():
-            display = gdk.display_get_default()
+        if self.server_randr:
+            display = gtk.gdk.display_get_default()
             i=0
             while i<display.get_n_screens():
                 screen = display.get_screen(i)
@@ -1002,12 +940,12 @@ class XpraClient(XpraClientBase):
 
     def set_encoding(self, encoding):
         assert encoding in ENCODINGS
-        assert encoding in self.server_capabilities.get("encodings", [])
+        assert encoding in self.server_capabilities.get("encodings", ["rgb24"])
         self.encoding = encoding
         self.send(["encoding", encoding])
 
     def _screen_size_changed(self, *args):
-        root_w, root_h = get_root_size()
+        root_w, root_h = gtk.gdk.get_default_root_window().get_size()
         log.debug("sending updated screen size to server: %sx%s", root_w, root_h)
         self.send(["desktop_size", root_w, root_h])
 
@@ -1033,14 +971,29 @@ class XpraClient(XpraClientBase):
         window = self._id_to_window.get(wid)
         if not window:
             return      #window is already gone!
-        window.draw_region(x, y, width, height, coding, data, rowstride)
+        window.draw(x, y, width, height, coding, data, rowstride)
         self.pixel_counter.append((time.time(), width*height))
         if packet_sequence:
             self.send_now(["damage-sequence", packet_sequence])
 
     def _process_cursor(self, packet):
         (_, new_cursor) = packet
-        set_windows_cursor(self._id_to_window.values(), new_cursor)
+        cursor = None
+        if len(new_cursor)>0:
+            (_, _, w, h, xhot, yhot, serial, pixels) = new_cursor
+            log.debug("new cursor at %s,%s with serial=%s, dimensions: %sx%s, len(pixels)=%s" % (xhot,yhot, serial, w,h, len(pixels)))
+            pixbuf = gtk.gdk.pixbuf_new_from_data(pixels, gtk.gdk.COLORSPACE_RGB, True, 8, w, h, w * 4)
+            x = max(0, min(xhot, w-1))
+            y = max(0, min(yhot, h-1))
+            size = gtk.gdk.display_get_default().get_default_cursor_size()
+            if size>0 and (size<w or size<h):
+                ratio = float(max(w,h))/size
+                pixbuf = pixbuf.scale_simple(int(w/ratio), int(h/ratio), gtk.gdk.INTERP_BILINEAR)
+                x = int(x/ratio)
+                y = int(y/ratio)
+            cursor = gtk.gdk.Cursor(gtk.gdk.display_get_default(), pixbuf, x, y)
+        for window in self._window_to_id.keys():
+            window.window.set_cursor(cursor)
 
     def _process_bell(self, packet):
         if not self.bell_enabled:
@@ -1049,11 +1002,11 @@ class XpraClient(XpraClientBase):
         gdkwindow = None
         if wid!=0:
             try:
-                gdkwindow = self._id_to_window[wid].get_window()
+                gdkwindow = self._id_to_window[wid].window
             except:
                 pass
         if gdkwindow is None:
-            gdkwindow = gdk.get_default_root_window()
+            gdkwindow = gtk.gdk.get_default_root_window()
         log("_process_bell(%s) gdkwindow=%s", packet, gdkwindow)
         self._client_extras.system_bell(gdkwindow, device, percent, pitch, duration, bell_class, bell_id, bell_name)
 
@@ -1095,7 +1048,8 @@ class XpraClient(XpraClientBase):
             self.clear_repeat()
 
     def process_packet(self, proto, packet):
-        packet_type = str(packet[0])
+        packet_type = packet[0]
+        assert isinstance(packet_type, str)
         if packet_type.startswith("clipboard-"):
             if self.clipboard_enabled:
                 self._client_extras.process_clipboard_packet(packet)
